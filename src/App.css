@@ -1,0 +1,201 @@
+/* Transcript panel styling */
+.transcript-box h2,
+.nudge-list h2 {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.transcript-box p {
+  text-align: left;
+  background-color: #f8fafb;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.transcript-box strong {
+  color: #185fa5;
+}
+
+/* Nudge card base styling */
+.nudge-card {
+  text-align: left;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  border: 1px solid #e2e8f0;
+  background-color: #ffffff;
+}
+
+.nudge-label {
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.nudge-question {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  background-color: #f8fafb;
+  border-left: 3px solid #378add;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+/* Nudge type colours — warn (Heads up) */
+.nudge-warn {
+  background-color: #faeeda;
+  border-color: #e0b974;
+}
+.nudge-warn .nudge-label {
+  color: #854f0b;
+}
+
+/* Nudge type colours — ask (Ask this) */
+.nudge-ask {
+  background-color: #e6f1fb;
+  border-color: #85b7eb;
+}
+.nudge-ask .nudge-label {
+  color: #185fa5;
+}
+
+/* Nudge type colours — flag (Missed cue) */
+.nudge-flag {
+  background-color: #fbeaf0;
+  border-color: #e08bab;
+}
+.nudge-flag .nudge-label {
+  color: #993556;
+}
+/* Top bar */
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  background-color: #ffffff;
+}
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.logo-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background-color: #1d9e75;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 13px;
+}
+.app-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+.app-sub {
+  font-size: 11px;
+  color: #6b7280;
+}
+.top-bar-right {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.teams-badge {
+  background-color: #e6f1fb;
+  color: #185fa5;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+.live-badge {
+  background-color: #fcebeb;
+  color: #a32d2d;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
+/* Call settings */
+.call-settings h2 {
+  font-size: 14px;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin-bottom: 10px;
+}
+.call-type-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.chip {
+  padding: 5px 11px;
+  border-radius: 20px;
+  font-size: 12px;
+  border: 1px solid #d1d5db;
+  background: transparent;
+  cursor: pointer;
+}
+.chip-active {
+  background-color: #e1f5ee;
+  color: #085041;
+  border-color: #5dcaa5;
+  font-weight: 500;
+}
+.listen-button {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  background-color: #e24b4a;
+  color: white;
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: 16px;
+}
+
+/* Session stats */
+.session-stats h2 {
+  font-size: 14px;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin: 16px 0 10px 0;
+}
+.stats-row {
+  display: flex;
+  gap: 8px;
+}
+.stat-card {
+  flex: 1;
+  background-color: #f8fafb;
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+}
+.stat-label {
+  font-size: 11px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+.stat-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+.stat-warn {
+  color: #854f0b;
+}
+.stat-good {
+  color: #0f6e56;
+}
