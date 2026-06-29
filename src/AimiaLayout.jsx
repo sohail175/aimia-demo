@@ -9,24 +9,22 @@ const BACKEND = 'http://127.0.0.1:8000'
 
 function AimiaLayout() {
   const [callType, setCallType] = useState('Sales discovery')
-
-  const [transcript, setTranscript] = useState([
-    { speaker: 'You', text: 'Thanks for joining today. I wanted to understand a bit more about how your team currently handles cultural diversity training.' },
-    { speaker: 'Client', text: 'Honestly, we do an induction once a year but the feedback has been pretty mixed. People find it a bit generic.' },
-    { speaker: 'You', text: 'What does your team structure look like — how many people are we talking about?' },
-    { speaker: 'Client', text: "We've got about 40 people across two offices, Melbourne and Sydney." },
-  ])
-
+  const [isListening, setIsListening] = useState(false)
+  const [transcript, setTranscript] = useState([])
   const [nudges, setNudges] = useState([
-    { nudge_id: 'nudge_001', nudge_type: 'warn', nudge_message: "You're doing most of the talking — let them lead.", helpful: null },
-    { nudge_id: 'nudge_002', nudge_type: 'ask', nudge_message: "Budget hasn't come up yet. Good time to explore it.", helpful: null },
-    { nudge_id: 'nudge_003', nudge_type: 'flag', nudge_message: "They said feedback was mixed — dig into this.", helpful: null },
+    { nudge_id: 'nudge_001', nudge_type: 'warn', nudge_message: "Start speaking to generate AI nudges.", helpful: null },
+    { nudge_id: 'nudge_002', nudge_type: 'ask', nudge_message: "Click Start Listening to begin.", helpful: null },
+    { nudge_id: 'nudge_003', nudge_type: 'flag', nudge_message: "Nudges will update as you speak.", helpful: null },
   ])
 
   const [callStatus, setCallStatus] = useState('live')
   const [nudgeStatus, setNudgeStatus] = useState('idle')
   const [summary, setSummary] = useState('')
   const nudgeIntervalRef = useRef(null)
+
+  const handleTranscriptUpdate = (newLine) => {
+    setTranscript(prev => [...prev, newLine])
+  }
 
   const generateNudges = async () => {
     if (transcript.length === 0) return
@@ -49,13 +47,17 @@ function AimiaLayout() {
   }
 
   useEffect(() => {
-    generateNudges()
-    nudgeIntervalRef.current = setInterval(generateNudges, 30000)
+    if (isListening) {
+      nudgeIntervalRef.current = setInterval(generateNudges, 30000)
+    } else {
+      clearInterval(nudgeIntervalRef.current)
+    }
     return () => clearInterval(nudgeIntervalRef.current)
-  }, [])
+  }, [isListening, transcript])
 
   const saveCall = async () => {
     setCallStatus('saving')
+    setIsListening(false)
     clearInterval(nudgeIntervalRef.current)
 
     // Step 1 — Sonnet generates summary
@@ -128,6 +130,11 @@ function AimiaLayout() {
             📋 Call type: <strong>{callType}</strong>
           </div>
 
+          {/* Listening status */}
+          <div style={{ fontSize: '13px', color: isListening ? '#22c55e' : '#888' }}>
+            {isListening ? '🎤 AIMIA is listening...' : '⏸ AIMIA is paused'}
+          </div>
+
           <button
             onClick={saveCall}
             disabled={callStatus === 'saving' || callStatus === 'saved'}
@@ -183,9 +190,19 @@ function AimiaLayout() {
             <CallSettings
               callType={callType}
               onCallTypeChange={setCallType}
+              isListening={isListening}
+              onListeningChange={setIsListening}
             />
-            <TranscriptPanel transcript={transcript} />
-            <SessionStats />
+            <TranscriptPanel
+              transcript={transcript}
+              isListening={isListening}
+              onTranscriptUpdate={handleTranscriptUpdate}
+            />
+            <SessionStats
+  transcript={transcript}
+  nudges={nudges}
+  isListening={isListening}
+/>
           </div>
           <div style={{ width: '50%', padding: '16px', overflowY: 'auto' }}>
             <NudgeCards nudges={nudges} onFeedback={handleFeedback} />

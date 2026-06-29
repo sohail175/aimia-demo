@@ -1,7 +1,6 @@
 import { useState } from 'react'
 
-function CallSettings({ callType, onCallTypeChange }) {
-  const [listening, setListening] = useState(true)
+function CallSettings({ callType, onCallTypeChange, isListening, onListeningChange }) {
   const options = ['Sales discovery', 'Requirements', 'Internal']
 
   return (
@@ -20,9 +19,20 @@ function CallSettings({ callType, onCallTypeChange }) {
       </div>
       <button
         className="listen-button"
-        onClick={() => setListening(!listening)}
+        onClick={() => onListeningChange(!isListening)}
+        style={{
+          backgroundColor: isListening ? '#ef4444' : '#22c55e',
+          color: 'white',
+          border: 'none',
+          padding: '8px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontWeight: 'bold',
+          width: '100%',
+          marginTop: '8px'
+        }}
       >
-        {listening ? 'Stop listening' : 'Start listening'}
+        {isListening ? '⏹ Stop listening' : '🎤 Start listening'}
       </button>
     </div>
   )
