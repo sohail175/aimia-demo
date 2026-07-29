@@ -1,6 +1,5 @@
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
 
 class TranscriptLine(BaseModel):
     speaker: str
@@ -12,10 +11,17 @@ class NudgeFeedback(BaseModel):
     nudge_message: str
     helpful: bool
 
+class Comment(BaseModel):
+    commenter_name: str
+    comment_text: str
+    timestamp: str
+
 class CallRecord(BaseModel):
     call_id: str
     call_type: str
+    agent_name: Optional[str] = "Unknown"
     timestamp: str
     transcript: List[TranscriptLine]
     nudges: List[NudgeFeedback] = []
     summary: Optional[str] = None
+    comments: List[Comment] = []
