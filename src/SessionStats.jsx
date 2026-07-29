@@ -1,51 +1,93 @@
 import { useState, useEffect } from 'react'
 
+const purple       = '#6B5CE7'
+const purpleLight  = '#F4F3FF'
+const purpleBorder = '#DDD9FF'
+const dark         = '#1A1A2E'
+
 function SessionStats({ transcript, nudges, isListening }) {
-  const [duration, setDuration] = useState(0)
   const [secondsElapsed, setSecondsElapsed] = useState(0)
 
-  // Real duration timer
   useEffect(() => {
     let timer
     if (isListening) {
-      timer = setInterval(() => {
-        setSecondsElapsed(prev => prev + 1)
-      }, 1000)
+      timer = setInterval(() => setSecondsElapsed(prev => prev + 1), 1000)
     }
     return () => clearInterval(timer)
   }, [isListening])
 
-  // Format seconds to mm:ss
   const formatDuration = (seconds) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0')
     const s = (seconds % 60).toString().padStart(2, '0')
     return `${m}:${s}`
   }
 
-  // Real talk percentage — based on transcript lines spoken by "You"
-  const yourLines = transcript.filter(l => l.speaker === 'You').length
-  const totalLines = transcript.length
+  const yourLines      = transcript.filter(l => l.speaker === 'You').length
+  const totalLines     = transcript.length
   const talkPercentage = totalLines === 0 ? 0 : Math.round((yourLines / totalLines) * 100)
+  const nudgeCount     = nudges.length
 
-  // Real nudge count
-  const nudgeCount = nudges.length
+  // Traffic-light colour for talk ratio
+  const talkColor =
+    talkPercentage > 70 ? '#ef4444' :
+    talkPercentage > 50 ? '#f59e0b' : '#22c55e'
 
   return (
-    <div className="session-stats">
-      <h2>Session Stats</h2>
-      <div className="stats-row">
-        <div className="stat-card">
-          <div className="stat-label">Duration</div>
-          <div className="stat-value">{formatDuration(secondsElapsed)}</div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+
+      {/* Section label */}
+      <div style={{
+        fontSize: '11px', fontWeight: '700', color: purple,
+        letterSpacing: '0.06em', textTransform: 'uppercase',
+      }}>
+        Session Stats
+      </div>
+
+      {/* Stat cards */}
+      <div style={{ display: 'flex', gap: '8px' }}>
+
+        {/* Duration */}
+        <div style={{
+          flex: 1, padding: '10px 12px', borderRadius: '10px',
+          background: purpleLight, border: `1px solid ${purpleBorder}`,
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '10px', fontWeight: '600', color: '#9CA3AF', marginBottom: '4px', letterSpacing: '0.04em' }}>
+            DURATION
+          </div>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: dark, fontVariantNumeric: 'tabular-nums' }}>
+            {formatDuration(secondsElapsed)}
+          </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-label">You talking</div>
-          <div className="stat-value stat-warn">{talkPercentage}%</div>
+
+        {/* You talking */}
+        <div style={{
+          flex: 1, padding: '10px 12px', borderRadius: '10px',
+          background: purpleLight, border: `1px solid ${purpleBorder}`,
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '10px', fontWeight: '600', color: '#9CA3AF', marginBottom: '4px', letterSpacing: '0.04em' }}>
+            YOU TALKING
+          </div>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: talkColor, fontVariantNumeric: 'tabular-nums' }}>
+            {talkPercentage}%
+          </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-label">Nudges</div>
-          <div className="stat-value stat-good">{nudgeCount}</div>
+
+        {/* Nudges */}
+        <div style={{
+          flex: 1, padding: '10px 12px', borderRadius: '10px',
+          background: purpleLight, border: `1px solid ${purpleBorder}`,
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '10px', fontWeight: '600', color: '#9CA3AF', marginBottom: '4px', letterSpacing: '0.04em' }}>
+            NUDGES
+          </div>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: purple, fontVariantNumeric: 'tabular-nums' }}>
+            {nudgeCount}
+          </div>
         </div>
+
       </div>
     </div>
   )

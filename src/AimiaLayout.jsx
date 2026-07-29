@@ -47,24 +47,17 @@ function AimiaLayout({ onViewChange }) {
   const generateNudge = async () => {
     const currentTranscript = transcriptRef.current
     if (currentTranscript.length === 0) return
-
     setIsGenerating(true)
     setCurrentNudge(null)
-
     try {
       const preCallContext = contextChipsRef.current
         .filter(c => !c.isImage)
         .map(c => c.text)
         .join('\n')
-
       const res = await fetch(`${BACKEND}/generate-nudges`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          transcript: currentTranscript,
-          call_type: callType,
-          pre_call_context: preCallContext,
-        }),
+        body: JSON.stringify({ transcript: currentTranscript, call_type: callType, pre_call_context: preCallContext }),
       })
       const data = await res.json()
       if (data.nudges && data.nudges.length > 0) {
@@ -89,12 +82,7 @@ function AimiaLayout({ onViewChange }) {
   }, [isListening])
 
   useEffect(() => {
-    if (
-      isListening &&
-      !firstNudgeFiredRef.current &&
-      !isGenerating &&
-      transcriptRef.current.length >= 1
-    ) {
+    if (isListening && !firstNudgeFiredRef.current && !isGenerating && transcriptRef.current.length >= 1) {
       firstNudgeFiredRef.current = true
       generateNudge()
     }
@@ -102,15 +90,12 @@ function AimiaLayout({ onViewChange }) {
 
   const handleFeedback = (helpful) => {
     if (!currentNudge) return
-    setNudgeHistory(prev => [
-      ...prev,
-      {
-        nudge_id: String(currentNudge.nudge_id),
-        nudge_type: currentNudge.nudge_type,
-        nudge_message: currentNudge.nudge_message,
-        helpful,
-      },
-    ])
+    setNudgeHistory(prev => [...prev, {
+      nudge_id: String(currentNudge.nudge_id),
+      nudge_type: currentNudge.nudge_type,
+      nudge_message: currentNudge.nudge_message,
+      helpful,
+    }])
     setCurrentNudge(null)
     generateNudge()
   }
@@ -118,19 +103,10 @@ function AimiaLayout({ onViewChange }) {
   const saveCall = async () => {
     setCallStatus('saving')
     setIsListening(false)
-
     const allNudges = [
       ...nudgeHistory,
-      ...(currentNudge
-        ? [{
-            nudge_id: String(currentNudge.nudge_id),
-            nudge_type: currentNudge.nudge_type,
-            nudge_message: currentNudge.nudge_message,
-            helpful: false,
-          }]
-        : []),
+      ...(currentNudge ? [{ nudge_id: String(currentNudge.nudge_id), nudge_type: currentNudge.nudge_type, nudge_message: currentNudge.nudge_message, helpful: false }] : []),
     ]
-
     let callSummary = 'Summary unavailable'
     try {
       const sumRes = await fetch(`${BACKEND}/generate-summary`, {
@@ -139,25 +115,16 @@ function AimiaLayout({ onViewChange }) {
         body: JSON.stringify({ transcript, call_type: callType, nudges: allNudges }),
       })
       const sumData = await sumRes.json()
-      if (sumData.summary) {
-        callSummary = sumData.summary
-        setSummary(callSummary)
-      }
-    } catch (err) {
-      console.error('Summary failed:', err)
-    }
+      if (sumData.summary) { callSummary = sumData.summary; setSummary(callSummary) }
+    } catch (err) { console.error('Summary failed:', err) }
 
     const callData = {
       call_id: `call_${Date.now()}`,
       call_type: callType,
       agent_name: agentName.trim() || 'Unknown',
       timestamp: new Date().toISOString(),
-      transcript,
-      nudges: allNudges,
-      summary: callSummary,
-      comments: [],
+      transcript, nudges: allNudges, summary: callSummary, comments: [],
     }
-
     try {
       const res = await fetch(`${BACKEND}/save-call`, {
         method: 'POST',
@@ -166,10 +133,7 @@ function AimiaLayout({ onViewChange }) {
       })
       if (res.ok) setCallStatus('saved')
       else setCallStatus('error')
-    } catch (err) {
-      console.error('Save failed:', err)
-      setCallStatus('error')
-    }
+    } catch (err) { console.error('Save failed:', err); setCallStatus('error') }
   }
 
   const addContextChip = (text) => {
@@ -178,25 +142,17 @@ function AimiaLayout({ onViewChange }) {
   }
 
   const handleAddClick = () => {
-    if (preCallInput.trim()) {
-      addContextChip(preCallInput)
-      setPreCallInput('')
-    }
+    if (preCallInput.trim()) { addContextChip(preCallInput); setPreCallInput('') }
     if (preCallImages.length > 0) {
       preCallImages.forEach(img => {
-        setContextChips(prev => [...prev, {
-          id: nextId(), text: img.name, isFile: false, isImage: true, src: img.src,
-        }])
+        setContextChips(prev => [...prev, { id: nextId(), text: img.name, isFile: false, isImage: true, src: img.src }])
       })
       setPreCallImages([])
     }
   }
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && canSubmit) {
-      e.preventDefault()
-      handleAddClick()
-    }
+    if (e.key === 'Enter' && !e.shiftKey && canSubmit) { e.preventDefault(); handleAddClick() }
   }
 
   const handleFileSelect = (e) => {
@@ -204,9 +160,7 @@ function AimiaLayout({ onViewChange }) {
     files.forEach(file => {
       if (file.type.startsWith('image/')) {
         const reader = new FileReader()
-        reader.onload = (ev) => {
-          setPreCallImages(prev => [...prev, { id: nextId(), name: file.name, src: ev.target.result }])
-        }
+        reader.onload = (ev) => setPreCallImages(prev => [...prev, { id: nextId(), name: file.name, src: ev.target.result }])
         reader.readAsDataURL(file)
       } else {
         setContextChips(prev => [...prev, { id: nextId(), text: file.name, isFile: true, isImage: false }])
@@ -219,9 +173,7 @@ function AimiaLayout({ onViewChange }) {
     const files = Array.from(e.target.files || [])
     files.forEach(file => {
       const reader = new FileReader()
-      reader.onload = (ev) => {
-        setPreCallImages(prev => [...prev, { id: nextId(), name: file.name, src: ev.target.result }])
-      }
+      reader.onload = (ev) => setPreCallImages(prev => [...prev, { id: nextId(), name: file.name, src: ev.target.result }])
       reader.readAsDataURL(file)
     })
     e.target.value = ''
@@ -234,9 +186,7 @@ function AimiaLayout({ onViewChange }) {
         e.preventDefault()
         const file = item.getAsFile()
         const reader = new FileReader()
-        reader.onload = (ev) => {
-          setPreCallImages(prev => [...prev, { id: nextId(), name: 'pasted-image.png', src: ev.target.result }])
-        }
+        reader.onload = (ev) => setPreCallImages(prev => [...prev, { id: nextId(), name: 'pasted-image.png', src: ev.target.result }])
         reader.readAsDataURL(file)
         return
       }
@@ -246,15 +196,12 @@ function AimiaLayout({ onViewChange }) {
   const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true) }
   const handleDragLeave = () => setIsDragging(false)
   const handleDrop = (e) => {
-    e.preventDefault()
-    setIsDragging(false)
+    e.preventDefault(); setIsDragging(false)
     const files = Array.from(e.dataTransfer.files || [])
     files.forEach(file => {
       if (file.type.startsWith('image/')) {
         const reader = new FileReader()
-        reader.onload = (ev) => {
-          setPreCallImages(prev => [...prev, { id: nextId(), name: file.name, src: ev.target.result }])
-        }
+        reader.onload = (ev) => setPreCallImages(prev => [...prev, { id: nextId(), name: file.name, src: ev.target.result }])
         reader.readAsDataURL(file)
       } else {
         setContextChips(prev => [...prev, { id: nextId(), text: file.name, isFile: true, isImage: false }])
@@ -265,21 +212,31 @@ function AimiaLayout({ onViewChange }) {
   const removeImage = (id) => setPreCallImages(prev => prev.filter(img => img.id !== id))
   const removeChip = (id) => setContextChips(prev => prev.filter(c => c.id !== id))
 
-  const allNudgesForStats = [
-    ...nudgeHistory,
-    ...(currentNudge ? [currentNudge] : []),
-  ]
+  const allNudgesForStats = [...nudgeHistory, ...(currentNudge ? [currentNudge] : [])]
+
+  // ── Atlas colour tokens ──────────────────────────────────────────────────
+  const purple = '#6B5CE7'
+  const purpleLight = '#F4F3FF'
+  const purpleBorder = '#DDD9FF'
+  const purpleMid = '#EEF2FF'
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', fontFamily: 'Inter, sans-serif' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', fontFamily: 'Inter, "Segoe UI", sans-serif', background: '#F8F7FF' }}>
       <TopBar isListening={isListening} currentView="live" onViewChange={onViewChange} />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-        <div style={{ width: '60%', borderRight: '1px solid #e5e7eb', padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* ── LEFT PANEL ── */}
+        <div style={{
+          width: '60%', borderRight: `1px solid ${purpleBorder}`,
+          padding: '16px', overflowY: 'auto',
+          display: 'flex', flexDirection: 'column', gap: '12px',
+          background: '#ffffff',
+        }}>
 
+          {/* Agent Name */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#6B7280', whiteSpace: 'nowrap' }}>
               Your name:
             </label>
             <input
@@ -287,17 +244,31 @@ function AimiaLayout({ onViewChange }) {
               value={agentName}
               onChange={e => setAgentName(e.target.value)}
               placeholder="Enter your name"
-              style={{ flex: 1, padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', outline: 'none', fontFamily: 'inherit' }}
+              style={{
+                flex: 1, padding: '6px 10px',
+                border: `1px solid ${purpleBorder}`, borderRadius: '7px',
+                fontSize: '13px', outline: 'none', fontFamily: 'inherit',
+                transition: 'border-color 0.15s',
+              }}
+              onFocus={e => e.target.style.borderColor = purple}
+              onBlur={e => e.target.style.borderColor = purpleBorder}
             />
           </div>
 
+          {/* Pre-call Context */}
           <div
-            style={{ border: `1.5px solid ${isDragging ? '#6366f1' : '#d1d5db'}`, borderRadius: '12px', padding: '10px 12px', background: '#fff', transition: 'border-color 0.15s' }}
+            style={{
+              border: `1.5px solid ${isDragging ? purple : purpleBorder}`,
+              borderRadius: '12px', padding: '10px 12px',
+              background: isDragging ? purpleLight : '#fff',
+              transition: 'border-color 0.15s, background 0.15s',
+              boxShadow: '0 1px 4px rgba(107,92,231,0.05)',
+            }}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
-            <div style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', marginBottom: '6px', letterSpacing: '0.04em' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: purple, marginBottom: '6px', letterSpacing: '0.06em' }}>
               PRE-CALL CONTEXT
             </div>
 
@@ -306,7 +277,7 @@ function AimiaLayout({ onViewChange }) {
                 {preCallImages.map(img => (
                   <div key={img.id} style={{ position: 'relative' }}>
                     <img src={img.src} alt={img.name}
-                      style={{ width: '52px', height: '52px', objectFit: 'cover', borderRadius: '8px', border: '1.5px solid #e5e7eb', display: 'block' }} />
+                      style={{ width: '52px', height: '52px', objectFit: 'cover', borderRadius: '8px', border: `1.5px solid ${purpleBorder}`, display: 'block' }} />
                     <button onClick={() => removeImage(img.id)}
                       style={{ position: 'absolute', top: '-5px', right: '-5px', width: '16px', height: '16px', borderRadius: '50%', background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
                       ×
@@ -332,9 +303,16 @@ function AimiaLayout({ onViewChange }) {
                 <button onClick={() => fileInputRef.current?.click()} title="Upload file"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#9ca3af', fontSize: '16px' }}>📎</button>
                 <button onClick={handleAddClick} disabled={!canSubmit} title="Add to context"
-                  style={{ width: '30px', height: '30px', borderRadius: '8px', background: canSubmit ? '#dc2626' : '#e5e7eb', color: canSubmit ? 'white' : '#9ca3af', border: 'none', cursor: canSubmit ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', fontWeight: 'bold', transition: 'background 0.15s, color 0.15s', flexShrink: 0 }}>
-                  ↑
-                </button>
+                  style={{
+                    width: '30px', height: '30px', borderRadius: '8px',
+                    background: canSubmit ? purple : '#e5e7eb',
+                    color: canSubmit ? 'white' : '#9ca3af',
+                    border: 'none', cursor: canSubmit ? 'pointer' : 'default',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '15px', fontWeight: 'bold',
+                    transition: 'background 0.15s, color 0.15s', flexShrink: 0,
+                    boxShadow: canSubmit ? '0 2px 6px rgba(107,92,231,0.3)' : 'none',
+                  }}>↑</button>
               </div>
             </div>
 
@@ -342,20 +320,27 @@ function AimiaLayout({ onViewChange }) {
             <input ref={imageInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleImageSelect} />
           </div>
 
+          {/* Context Chips */}
           {contextChips.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
               {contextChips.map(chip => (
                 chip.isImage ? (
                   <div key={chip.id} style={{ position: 'relative' }}>
                     <img src={chip.src} alt={chip.text}
-                      style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '6px', border: '1.5px solid #86efac', display: 'block' }} />
+                      style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '6px', border: `1.5px solid ${purpleBorder}`, display: 'block' }} />
                     <button onClick={() => removeChip(chip.id)}
                       style={{ position: 'absolute', top: '-5px', right: '-5px', width: '14px', height: '14px', borderRadius: '50%', background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
                       ×
                     </button>
                   </div>
                 ) : (
-                  <div key={chip.id} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', maxWidth: '240px', background: chip.isFile ? '#f1f5f9' : '#f0fdf4', border: `0.5px solid ${chip.isFile ? '#cbd5e1' : '#86efac'}`, color: chip.isFile ? '#475569' : '#166534' }}>
+                  <div key={chip.id} style={{
+                    display: 'flex', alignItems: 'center', gap: '5px',
+                    padding: '3px 10px', borderRadius: '20px', fontSize: '11px', maxWidth: '240px',
+                    background: chip.isFile ? '#f1f5f9' : purpleLight,
+                    border: `0.5px solid ${chip.isFile ? '#cbd5e1' : purpleBorder}`,
+                    color: chip.isFile ? '#475569' : purple,
+                  }}>
                     <span>{chip.isFile ? '📄' : '✓'}</span>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {chip.text.length > 38 ? chip.text.slice(0, 38) + '…' : chip.text}
@@ -366,7 +351,7 @@ function AimiaLayout({ onViewChange }) {
                 )
               ))}
               <button onClick={() => { setContextChips([]); setPreCallImages([]) }}
-                style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', border: '0.5px solid #fecaca', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
+                style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', border: `0.5px solid ${purpleBorder}`, background: purpleLight, color: purple, cursor: 'pointer' }}>
                 Clear all
               </button>
             </div>
@@ -374,33 +359,52 @@ function AimiaLayout({ onViewChange }) {
 
           <CallSettings callType={callType} onCallTypeChange={setCallType} isListening={isListening} onListeningChange={setIsListening} />
           <TranscriptPanel
-  transcript={transcript}
-  setTranscript={setTranscript}
-  isListening={isListening}
-  setIsListening={setIsListening}
-  agentName={agentName}
-/>
+            transcript={transcript}
+            setTranscript={setTranscript}
+            isListening={isListening}
+            setIsListening={setIsListening}
+            agentName={agentName}
+          />
           <SessionStats transcript={transcript} nudges={allNudgesForStats} isListening={isListening} />
 
+          {/* End Call Button */}
           <button
             onClick={saveCall}
             disabled={callStatus === 'saving' || callStatus === 'saved'}
-            style={{ padding: '12px 32px', backgroundColor: callStatus === 'saved' ? '#22c55e' : callStatus === 'error' ? '#ef4444' : callStatus === 'saving' ? '#888' : '#e11d48', color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 'bold', marginTop: '8px', cursor: callStatus === 'saving' ? 'not-allowed' : 'pointer' }}>
+            style={{
+              padding: '12px 32px',
+              backgroundColor:
+                callStatus === 'saved'  ? '#22c55e' :
+                callStatus === 'error'  ? '#ef4444' :
+                callStatus === 'saving' ? '#9ca3af' : '#e11d48',
+              color: 'white', border: 'none', borderRadius: '9px',
+              fontSize: '14px', fontWeight: '700', marginTop: '8px',
+              cursor: callStatus === 'saving' ? 'not-allowed' : 'pointer',
+              boxShadow: callStatus === 'live' ? '0 2px 8px rgba(225,29,72,0.3)' : 'none',
+              transition: 'all 0.2s',
+            }}>
             {callStatus === 'live'   && '⏹ End Call & Save'}
-            {callStatus === 'saving' && '💾 Saving + Generating Summary...'}
+            {callStatus === 'saving' && '💾 Saving + Generating Summary…'}
             {callStatus === 'saved'  && '✅ Call Saved!'}
             {callStatus === 'error'  && '❌ Save Failed — Retry'}
           </button>
 
+          {/* Summary */}
           {summary && (
-            <div style={{ padding: '16px', backgroundColor: '#1e293b', borderRadius: '8px', color: '#94a3b8', fontSize: '13px', textAlign: 'left', borderLeft: '3px solid #3b82f6', lineHeight: '1.6' }}>
-              <div style={{ color: '#3b82f6', fontWeight: 'bold', marginBottom: '8px' }}>📝 AI Call Summary (Sonnet)</div>
+            <div style={{
+              padding: '16px', borderRadius: '10px',
+              background: purpleLight, border: `1px solid ${purpleBorder}`,
+              borderLeft: `3px solid ${purple}`,
+              fontSize: '13px', lineHeight: '1.6', color: '#1A1A2E',
+            }}>
+              <div style={{ color: purple, fontWeight: '700', marginBottom: '8px' }}>📝 AI Call Summary</div>
               {summary}
             </div>
           )}
         </div>
 
-        <div style={{ width: '40%', padding: '16px', overflowY: 'auto' }}>
+        {/* ── RIGHT PANEL ── */}
+        <div style={{ width: '40%', padding: '16px', overflowY: 'auto', background: '#F8F7FF' }}>
           <NudgeCards
             currentNudge={currentNudge}
             isGenerating={isGenerating}
