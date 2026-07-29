@@ -7,66 +7,136 @@ import TopBar from './TopBar'
 
 const BACKEND = 'http://127.0.0.1:8000'
 
-function AimiaLayout() {
+function AimiaLayout({ onViewChange }) {
   const [callType, setCallType] = useState('Sales discovery')
   const [isListening, setIsListening] = useState(false)
   const [transcript, setTranscript] = useState([])
-  const [nudges, setNudges] = useState([
-    { nudge_id: 'nudge_001', nudge_type: 'warn', nudge_message: "Start speaking to generate AI nudges.", helpful: null },
-    { nudge_id: 'nudge_002', nudge_type: 'ask', nudge_message: "Click Start Listening to begin.", helpful: null },
-    { nudge_id: 'nudge_003', nudge_type: 'flag', nudge_message: "Nudges will update as you speak.", helpful: null },
-  ])
+  const [agentName, setAgentName] = useState('')
+
+  const [preCallInput, setPreCallInput] = useState('')
+  const [contextChips, setContextChips] = useState([])
+  const [preCallImages, setPreCallImages] = useState([])
+  const [isDragging, setIsDragging] = useState(false)
+
+  const [currentNudge, setCurrentNudge] = useState(null)
+  const [nudgeHistory, setNudgeHistory] = useState([])
+  const [isGenerating, setIsGenerating] = useState(false)
 
   const [callStatus, setCallStatus] = useState('live')
-  const [nudgeStatus, setNudgeStatus] = useState('idle')
   const [summary, setSummary] = useState('')
-  const nudgeIntervalRef = useRef(null)
+
+  const transcriptRef = useRef([])
+  const contextChipsRef = useRef([])
+  const preCallImagesRef = useRef([])
+  const fileInputRef = useRef(null)
+  const imageInputRef = useRef(null)
+  const idRef = useRef(0)
+  const firstNudgeFiredRef = useRef(false)
+
+  useEffect(() => { transcriptRef.current = transcript }, [transcript])
+  useEffect(() => { contextChipsRef.current = contextChips }, [contextChips])
+  useEffect(() => { preCallImagesRef.current = preCallImages }, [preCallImages])
+
+  const nextId = () => ++idRef.current
+  const canSubmit = preCallInput.trim().length > 0 || preCallImages.length > 0
 
   const handleTranscriptUpdate = (newLine) => {
     setTranscript(prev => [...prev, newLine])
   }
 
-  const generateNudges = async () => {
-    if (transcript.length === 0) return
-    setNudgeStatus('generating')
+  const generateNudge = async () => {
+    const currentTranscript = transcriptRef.current
+    if (currentTranscript.length === 0) return
+
+    setIsGenerating(true)
+    setCurrentNudge(null)
+
     try {
+      const preCallContext = contextChipsRef.current
+        .filter(c => !c.isImage)
+        .map(c => c.text)
+        .join('\n')
+
       const res = await fetch(`${BACKEND}/generate-nudges`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript, call_type: callType }),
+        body: JSON.stringify({
+          transcript: currentTranscript,
+          call_type: callType,
+          pre_call_context: preCallContext,
+        }),
       })
       const data = await res.json()
-      if (data.nudges) {
-        setNudges(data.nudges.map(n => ({ ...n, helpful: null })))
-        setNudgeStatus('done')
+      if (data.nudges && data.nudges.length > 0) {
+        setCurrentNudge({ ...data.nudges[0], helpful: null })
       }
     } catch (err) {
       console.error('Nudge generation failed:', err)
-      setNudgeStatus('error')
+    } finally {
+      setIsGenerating(false)
     }
   }
 
   useEffect(() => {
     if (isListening) {
-      nudgeIntervalRef.current = setInterval(generateNudges, 30000)
-    } else {
-      clearInterval(nudgeIntervalRef.current)
+      firstNudgeFiredRef.current = false
+      setCurrentNudge(null)
+      setNudgeHistory([])
+      setIsGenerating(false)
+      setCallStatus('live')
+      setSummary('')
     }
-    return () => clearInterval(nudgeIntervalRef.current)
-  }, [isListening, transcript])
+  }, [isListening])
+
+  useEffect(() => {
+    if (
+      isListening &&
+      !firstNudgeFiredRef.current &&
+      !isGenerating &&
+      transcriptRef.current.length >= 1
+    ) {
+      firstNudgeFiredRef.current = true
+      generateNudge()
+    }
+  }, [transcript])
+
+  const handleFeedback = (helpful) => {
+    if (!currentNudge) return
+    setNudgeHistory(prev => [
+      ...prev,
+      {
+        nudge_id: String(currentNudge.nudge_id),
+        nudge_type: currentNudge.nudge_type,
+        nudge_message: currentNudge.nudge_message,
+        helpful,
+      },
+    ])
+    setCurrentNudge(null)
+    generateNudge()
+  }
 
   const saveCall = async () => {
     setCallStatus('saving')
     setIsListening(false)
-    clearInterval(nudgeIntervalRef.current)
 
-    // Step 1 — Sonnet generates summary
+    const allNudges = [
+      ...nudgeHistory,
+      ...(currentNudge
+        ? [{
+            nudge_id: String(currentNudge.nudge_id),
+            nudge_type: currentNudge.nudge_type,
+            nudge_message: currentNudge.nudge_message,
+            helpful: false,
+          }]
+        : []),
+    ]
+
     let callSummary = 'Summary unavailable'
     try {
       const sumRes = await fetch(`${BACKEND}/generate-summary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript, call_type: callType, nudges }),
+        body: JSON.stringify({ transcript, call_type: callType, nudges: allNudges }),
       })
       const sumData = await sumRes.json()
       if (sumData.summary) {
@@ -77,19 +147,15 @@ function AimiaLayout() {
       console.error('Summary failed:', err)
     }
 
-    // Step 2 — Save call with real summary
     const callData = {
       call_id: `call_${Date.now()}`,
       call_type: callType,
+      agent_name: agentName.trim() || 'Unknown',
       timestamp: new Date().toISOString(),
       transcript,
-      nudges: nudges.map(n => ({
-        nudge_id: String(n.nudge_id),
-        nudge_type: n.nudge_type,
-        nudge_message: n.nudge_message,
-        helpful: n.helpful ?? false,
-      })),
+      nudges: allNudges,
       summary: callSummary,
+      comments: [],
     }
 
     try {
@@ -106,107 +172,242 @@ function AimiaLayout() {
     }
   }
 
-  const handleFeedback = (nudge_id, helpful) => {
-    setNudges(prev =>
-      prev.map(n => n.nudge_id === nudge_id ? { ...n, helpful } : n)
-    )
+  const addContextChip = (text) => {
+    if (!text.trim()) return
+    setContextChips(prev => [...prev, { id: nextId(), text: text.trim(), isFile: false, isImage: false }])
   }
 
+  const handleAddClick = () => {
+    if (preCallInput.trim()) {
+      addContextChip(preCallInput)
+      setPreCallInput('')
+    }
+    if (preCallImages.length > 0) {
+      preCallImages.forEach(img => {
+        setContextChips(prev => [...prev, {
+          id: nextId(), text: img.name, isFile: false, isImage: true, src: img.src,
+        }])
+      })
+      setPreCallImages([])
+    }
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && canSubmit) {
+      e.preventDefault()
+      handleAddClick()
+    }
+  }
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files || [])
+    files.forEach(file => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader()
+        reader.onload = (ev) => {
+          setPreCallImages(prev => [...prev, { id: nextId(), name: file.name, src: ev.target.result }])
+        }
+        reader.readAsDataURL(file)
+      } else {
+        setContextChips(prev => [...prev, { id: nextId(), text: file.name, isFile: true, isImage: false }])
+      }
+    })
+    e.target.value = ''
+  }
+
+  const handleImageSelect = (e) => {
+    const files = Array.from(e.target.files || [])
+    files.forEach(file => {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        setPreCallImages(prev => [...prev, { id: nextId(), name: file.name, src: ev.target.result }])
+      }
+      reader.readAsDataURL(file)
+    })
+    e.target.value = ''
+  }
+
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items || []
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        const file = item.getAsFile()
+        const reader = new FileReader()
+        reader.onload = (ev) => {
+          setPreCallImages(prev => [...prev, { id: nextId(), name: 'pasted-image.png', src: ev.target.result }])
+        }
+        reader.readAsDataURL(file)
+        return
+      }
+    }
+  }
+
+  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true) }
+  const handleDragLeave = () => setIsDragging(false)
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const files = Array.from(e.dataTransfer.files || [])
+    files.forEach(file => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader()
+        reader.onload = (ev) => {
+          setPreCallImages(prev => [...prev, { id: nextId(), name: file.name, src: ev.target.result }])
+        }
+        reader.readAsDataURL(file)
+      } else {
+        setContextChips(prev => [...prev, { id: nextId(), text: file.name, isFile: true, isImage: false }])
+      }
+    })
+  }
+
+  const removeImage = (id) => setPreCallImages(prev => prev.filter(img => img.id !== id))
+  const removeChip = (id) => setContextChips(prev => prev.filter(c => c.id !== id))
+
+  const allNudgesForStats = [
+    ...nudgeHistory,
+    ...(currentNudge ? [currentNudge] : []),
+  ]
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%' }}>
-      <TopBar />
-      <div style={{ display: 'flex', flex: 1 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', fontFamily: 'Inter, sans-serif' }}>
+      <TopBar isListening={isListening} currentView="live" onViewChange={onViewChange} />
 
-        {/* LEFT 60% — Teams placeholder */}
-        <div style={{
-          width: '60%', backgroundColor: '#1a1a1a', color: '#888',
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          justifyContent: 'center', fontSize: '20px', gap: '12px',
-        }}>
-          Microsoft Teams call appears here
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-          {/* Active call type indicator */}
-          <div style={{ fontSize: '13px', color: '#3b82f6' }}>
-            📋 Call type: <strong>{callType}</strong>
+        <div style={{ width: '60%', borderRight: '1px solid #e5e7eb', padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>
+              Your name:
+            </label>
+            <input
+              type="text"
+              value={agentName}
+              onChange={e => setAgentName(e.target.value)}
+              placeholder="Enter your name"
+              style={{ flex: 1, padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', outline: 'none', fontFamily: 'inherit' }}
+            />
           </div>
 
-          {/* Listening status */}
-          <div style={{ fontSize: '13px', color: isListening ? '#22c55e' : '#888' }}>
-            {isListening ? '🎤 AIMIA is listening...' : '⏸ AIMIA is paused'}
+          <div
+            style={{ border: `1.5px solid ${isDragging ? '#6366f1' : '#d1d5db'}`, borderRadius: '12px', padding: '10px 12px', background: '#fff', transition: 'border-color 0.15s' }}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <div style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', marginBottom: '6px', letterSpacing: '0.04em' }}>
+              PRE-CALL CONTEXT
+            </div>
+
+            {preCallImages.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                {preCallImages.map(img => (
+                  <div key={img.id} style={{ position: 'relative' }}>
+                    <img src={img.src} alt={img.name}
+                      style={{ width: '52px', height: '52px', objectFit: 'cover', borderRadius: '8px', border: '1.5px solid #e5e7eb', display: 'block' }} />
+                    <button onClick={() => removeImage(img.id)}
+                      style={{ position: 'absolute', top: '-5px', right: '-5px', width: '16px', height: '16px', borderRadius: '50%', background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
+              <textarea
+                value={preCallInput}
+                onChange={e => setPreCallInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                placeholder={isDragging ? 'Drop here…' : 'Add LinkedIn URL, prospect details, deal notes, or drag & drop files…'}
+                rows={2}
+                style={{ flex: 1, resize: 'none', border: 'none', outline: 'none', fontSize: '13px', color: '#111827', background: 'transparent', lineHeight: 1.5, fontFamily: 'inherit' }}
+              />
+              <div style={{ display: 'flex', gap: '4px', flexShrink: 0, alignItems: 'center' }}>
+                <button onClick={() => imageInputRef.current?.click()} title="Upload image"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#9ca3af', fontSize: '16px' }}>🖼</button>
+                <button onClick={() => fileInputRef.current?.click()} title="Upload file"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#9ca3af', fontSize: '16px' }}>📎</button>
+                <button onClick={handleAddClick} disabled={!canSubmit} title="Add to context"
+                  style={{ width: '30px', height: '30px', borderRadius: '8px', background: canSubmit ? '#dc2626' : '#e5e7eb', color: canSubmit ? 'white' : '#9ca3af', border: 'none', cursor: canSubmit ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', fontWeight: 'bold', transition: 'background 0.15s, color 0.15s', flexShrink: 0 }}>
+                  ↑
+                </button>
+              </div>
+            </div>
+
+            <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={handleFileSelect} />
+            <input ref={imageInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleImageSelect} />
           </div>
+
+          {contextChips.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+              {contextChips.map(chip => (
+                chip.isImage ? (
+                  <div key={chip.id} style={{ position: 'relative' }}>
+                    <img src={chip.src} alt={chip.text}
+                      style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '6px', border: '1.5px solid #86efac', display: 'block' }} />
+                    <button onClick={() => removeChip(chip.id)}
+                      style={{ position: 'absolute', top: '-5px', right: '-5px', width: '14px', height: '14px', borderRadius: '50%', background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                      ×
+                    </button>
+                  </div>
+                ) : (
+                  <div key={chip.id} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', maxWidth: '240px', background: chip.isFile ? '#f1f5f9' : '#f0fdf4', border: `0.5px solid ${chip.isFile ? '#cbd5e1' : '#86efac'}`, color: chip.isFile ? '#475569' : '#166534' }}>
+                    <span>{chip.isFile ? '📄' : '✓'}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {chip.text.length > 38 ? chip.text.slice(0, 38) + '…' : chip.text}
+                    </span>
+                    <button onClick={() => removeChip(chip.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', padding: 0, opacity: 0.5, lineHeight: 1, flexShrink: 0 }}>×</button>
+                  </div>
+                )
+              ))}
+              <button onClick={() => { setContextChips([]); setPreCallImages([]) }}
+                style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', border: '0.5px solid #fecaca', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
+                Clear all
+              </button>
+            </div>
+          )}
+
+          <CallSettings callType={callType} onCallTypeChange={setCallType} isListening={isListening} onListeningChange={setIsListening} />
+          <TranscriptPanel
+  transcript={transcript}
+  setTranscript={setTranscript}
+  isListening={isListening}
+  setIsListening={setIsListening}
+  agentName={agentName}
+/>
+          <SessionStats transcript={transcript} nudges={allNudgesForStats} isListening={isListening} />
 
           <button
             onClick={saveCall}
             disabled={callStatus === 'saving' || callStatus === 'saved'}
-            style={{
-              padding: '12px 32px',
-              backgroundColor:
-                callStatus === 'saved'  ? '#22c55e' :
-                callStatus === 'error'  ? '#ef4444' :
-                callStatus === 'saving' ? '#888'    : '#e11d48',
-              color: 'white', border: 'none', borderRadius: '8px',
-              fontSize: '16px',
-              cursor: callStatus === 'saving' ? 'not-allowed' : 'pointer',
-              fontWeight: 'bold',
-            }}
-          >
+            style={{ padding: '12px 32px', backgroundColor: callStatus === 'saved' ? '#22c55e' : callStatus === 'error' ? '#ef4444' : callStatus === 'saving' ? '#888' : '#e11d48', color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 'bold', marginTop: '8px', cursor: callStatus === 'saving' ? 'not-allowed' : 'pointer' }}>
             {callStatus === 'live'   && '⏹ End Call & Save'}
             {callStatus === 'saving' && '💾 Saving + Generating Summary...'}
             {callStatus === 'saved'  && '✅ Call Saved!'}
             {callStatus === 'error'  && '❌ Save Failed — Retry'}
           </button>
 
-          {/* Nudge status */}
-          <div style={{ fontSize: '12px', color: '#555' }}>
-            {nudgeStatus === 'generating' && '🤖 Haiku generating nudges...'}
-            {nudgeStatus === 'done'       && '✅ Nudges updated'}
-            {nudgeStatus === 'error'      && '⚠️ Nudge error'}
-          </div>
-
-          {/* Sonnet summary after call ends */}
           {summary && (
-            <div style={{
-              margin: '16px', padding: '16px',
-              backgroundColor: '#1e293b',
-              borderRadius: '8px',
-              color: '#94a3b8',
-              fontSize: '13px',
-              maxWidth: '400px',
-              textAlign: 'left',
-              borderLeft: '3px solid #3b82f6',
-              lineHeight: '1.6',
-            }}>
-              <div style={{ color: '#3b82f6', fontWeight: 'bold', marginBottom: '8px' }}>
-                📝 AI Call Summary (Sonnet)
-              </div>
+            <div style={{ padding: '16px', backgroundColor: '#1e293b', borderRadius: '8px', color: '#94a3b8', fontSize: '13px', textAlign: 'left', borderLeft: '3px solid #3b82f6', lineHeight: '1.6' }}>
+              <div style={{ color: '#3b82f6', fontWeight: 'bold', marginBottom: '8px' }}>📝 AI Call Summary (Sonnet)</div>
               {summary}
             </div>
           )}
         </div>
 
-        {/* RIGHT 40% — AIMIA panel */}
-        <div style={{ width: '40%', display: 'flex' }}>
-          <div style={{ width: '50%', borderRight: '1px solid #ddd', padding: '16px', overflowY: 'auto' }}>
-            <CallSettings
-              callType={callType}
-              onCallTypeChange={setCallType}
-              isListening={isListening}
-              onListeningChange={setIsListening}
-            />
-            <TranscriptPanel
-              transcript={transcript}
-              isListening={isListening}
-              onTranscriptUpdate={handleTranscriptUpdate}
-            />
-            <SessionStats
-  transcript={transcript}
-  nudges={nudges}
-  isListening={isListening}
-/>
-          </div>
-          <div style={{ width: '50%', padding: '16px', overflowY: 'auto' }}>
-            <NudgeCards nudges={nudges} onFeedback={handleFeedback} />
-          </div>
+        <div style={{ width: '40%', padding: '16px', overflowY: 'auto' }}>
+          <NudgeCards
+            currentNudge={currentNudge}
+            isGenerating={isGenerating}
+            isListening={isListening}
+            nudgeCount={allNudgesForStats.length}
+            onFeedback={handleFeedback}
+          />
         </div>
 
       </div>
