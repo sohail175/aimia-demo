@@ -5,7 +5,7 @@ import CallSettings from './CallSettings'
 import SessionStats from './SessionStats'
 import TopBar from './TopBar'
 
-const BACKEND = 'http://127.0.0.1:8000'
+const BACKEND = 'https://aimia-demo.onrender.com'
 
 function AimiaLayout({ onViewChange }) {
   const [callType, setCallType] = useState('Sales discovery')

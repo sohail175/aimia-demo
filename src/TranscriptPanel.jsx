@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-const BACKEND = 'http://127.0.0.1:8000'
+const BACKEND = 'https://aimia-demo.onrender.com'
 const SYS_CHUNK_MS = 5000
 
 const SPEAKER_COLORS = { 'You': '#6B5CE7', 'Customer': '#d97706' }
