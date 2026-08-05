@@ -36,7 +36,9 @@ function AimiaLayout({ onViewChange }) {
   useEffect(() => { transcriptRef.current = transcript }, [transcript])
   useEffect(() => { contextChipsRef.current = contextChips }, [contextChips])
   useEffect(() => { preCallImagesRef.current = preCallImages }, [preCallImages])
-
+useEffect(() => {
+  fetch(BACKEND).catch(() => {})
+}, [])
   const nextId = () => ++idRef.current
   const canSubmit = preCallInput.trim().length > 0 || preCallImages.length > 0
 

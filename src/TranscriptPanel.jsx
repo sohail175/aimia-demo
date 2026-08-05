@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 
-const BACKEND = 'https://aimia-demo.onrender.com'
-const SYS_CHUNK_MS = 5000
+const BACKEND  = 'https://aimia-demo.onrender.com'
+const CHUNK_MS = 3000
 
-const SPEAKER_COLORS = { 'You': '#6B5CE7', 'Customer': '#d97706' }
+const SPEAKER_COLORS = { You: '#6B5CE7', Customer: '#d97706' }
 const getColor = (name) => SPEAKER_COLORS[name] ?? '#0ea5e9'
 
-export default function TranscriptPanel({ transcript, setTranscript, isListening, setIsListening, agentName }) {
-  const [status, setStatus] = useState('')
-  const recognitionRef = useRef(null)
-  const sysRecorderRef = useRef(null)
-  const sysStreamRef   = useRef(null)
-  const isActiveRef    = useRef(false)
-  const bottomRef      = useRef(null)
+export default function TranscriptPanel({
+  transcript, setTranscript, isListening, setIsListening, agentName,
+}) {
+  const [status, setStatus]   = useState('')
+  const micStreamRef          = useRef(null)
+  const micRecorderRef        = useRef(null)
+  const sysStreamRef          = useRef(null)
+  const sysRecorderRef        = useRef(null)
+  const isActiveRef           = useRef(false)
+  const bottomRef             = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -20,7 +23,7 @@ export default function TranscriptPanel({ transcript, setTranscript, isListening
 
   useEffect(() => {
     if (isListening) startAll()
-    else stopAll()
+    else             stopAll()
     return () => stopAll()
   }, [isListening])
 
@@ -36,101 +39,103 @@ export default function TranscriptPanel({ transcript, setTranscript, isListening
     try {
       isActiveRef.current = true
 
-      // ── A. Web Speech API (mic → You) ─────────────────────────────────────
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-      if (!SR) {
-        setStatus('Web Speech API not supported in this browser')
-      } else {
-        const r = new SR()
-        r.continuous     = true
-        r.interimResults = true
-        r.lang           = 'en-US'
-
-        r.onstart = () => setStatus('Mic active — now select screen for customer audio…')
-
-        r.onresult = (ev) => {
-          for (let i = ev.resultIndex; i < ev.results.length; i++) {
-            if (ev.results[i].isFinal) {
-              const text = ev.results[i][0].transcript.trim()
-              if (text) addLine(agentName || 'You', text)
-            }
-          }
-        }
-
-        r.onerror = (e) => {
-          console.error('Speech recognition error:', e.error)
-          if (e.error === 'not-allowed') setStatus('Microphone permission denied — please allow mic access')
-          else if (e.error === 'network')  setStatus('Network error — Web Speech API needs internet')
-        }
-
-        r.onend = () => { if (isActiveRef.current) r.start() }
-        r.start()
-        recognitionRef.current = r
+      setStatus('🎤 Requesting microphone…')
+      let micStream
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl:  true,
+            channelCount:     1,
+            sampleRate:       16000,
+          },
+        })
+        micStreamRef.current = micStream
+      } catch {
+        setStatus('❌ Microphone denied — allow mic access then refresh')
+        setIsListening(false)
+        return
       }
 
-      // ── B. Screen share (system audio → Customer) ─────────────────────────
-      setStatus('Select screen — tick "Share system audio" then click Share…')
+      setStatus('📺 Select your WhatsApp / YouTube tab → click Share')
       let displayStream
       try {
-        displayStream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true })
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          audio: true,
+          video: { width: 1, height: 1 },
+        })
         displayStream.getVideoTracks().forEach(t => t.stop())
       } catch {
-        setStatus('Mic active — screen share skipped (customer audio unavailable)')
+        setStatus('🎤 Mic only — customer audio unavailable (screen share cancelled)')
+        startLoop(micStream, agentName || 'You', micRecorderRef)
         return
       }
 
       const sysAudio = displayStream.getAudioTracks()
-      if (sysAudio.length > 0) {
-        const sysStream = new MediaStream(sysAudio)
-        sysStreamRef.current = sysStream
-        setStatus('Recording — your speech is instant · customer speech every ~5s')
-        recordChunk(sysStream)
-      } else {
-        setStatus('Recording — mic only (no system audio in screen share)')
+      if (sysAudio.length === 0) {
+        setStatus('⚠️ No tab audio — stop, retry and tick "Share tab audio"')
+        startLoop(micStream, agentName || 'You', micRecorderRef)
+        return
       }
 
+      const sysStream      = new MediaStream(sysAudio)
+      sysStreamRef.current = sysStream
+      setStatus('🎙 Live — transcript updates every ~3 s')
+
+      startLoop(micStream,  agentName || 'You', micRecorderRef)
+      startLoop(sysStream,  'Customer',          sysRecorderRef)
+
     } catch (err) {
-      setStatus('Error: ' + err.message)
+      setStatus('❌ ' + err.message)
       setIsListening(false)
     }
   }
 
-  const recordChunk = (sysStream) => {
+  const startLoop = (stream, speaker, recorderRef) => {
     if (!isActiveRef.current) return
-    const chunks = []
     const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus' : 'audio/webm'
-    const recorder = new MediaRecorder(sysStream, { mimeType: mime })
-    sysRecorderRef.current = recorder
 
-    recorder.ondataavailable = (e) => { if (e.data?.size > 0) chunks.push(e.data) }
-    recorder.onstop = async () => {
-      if (chunks.length > 0 && isActiveRef.current) sendChunk(new Blob(chunks, { type: mime }))
-      recordChunk(sysStream)
+    const loop = () => {
+      if (!isActiveRef.current) return
+      const chunks = []
+      let rec
+      try { rec = new MediaRecorder(stream, { mimeType: mime }) } catch { return }
+      recorderRef.current = rec
+      rec.ondataavailable = (e) => { if (e.data?.size > 0) chunks.push(e.data) }
+      rec.onstop = () => {
+        const blob = new Blob(chunks, { type: mime })
+        if (blob.size > 1000 && isActiveRef.current) sendChunk(blob, speaker)
+        loop()
+      }
+      rec.start()
+      setTimeout(() => { if (rec.state === 'recording') rec.stop() }, CHUNK_MS)
     }
-
-    recorder.start()
-    setTimeout(() => { if (recorder.state === 'recording') recorder.stop() }, SYS_CHUNK_MS)
+    loop()
   }
 
-  const sendChunk = async (blob) => {
+  const sendChunk = async (blob, speaker) => {
     try {
       const form = new FormData()
       form.append('audio', blob, 'chunk.webm')
-      const res = await fetch(`${BACKEND}/transcribe-chunk`, { method: 'POST', body: form })
+      const res  = await fetch(`${BACKEND}/transcribe-chunk`, { method: 'POST', body: form })
       if (!res.ok) return
       const { text } = await res.json()
-      if (text?.trim()) addLine('Customer', text.trim())
-    } catch { /* silent */ }
+      if (text?.trim()) addLine(speaker, text.trim())
+    } catch {}
   }
 
   const stopAll = () => {
     isActiveRef.current = false
-    recognitionRef.current?.stop()
-    recognitionRef.current = null
-    if (sysRecorderRef.current?.state === 'recording') sysRecorderRef.current.stop()
-    sysRecorderRef.current = null
-    sysStreamRef.current?.getTracks().forEach(t => t.stop())
+    for (const ref of [micRecorderRef, sysRecorderRef]) {
+      try { if (ref.current?.state === 'recording') ref.current.stop() } catch {}
+      ref.current = null
+    }
+    for (const ref of [micStreamRef, sysStreamRef]) {
+      ref.current?.getTracks().forEach(t => t.stop())
+      ref.current = null
+    }
     setStatus('')
   }
 
@@ -138,24 +143,22 @@ export default function TranscriptPanel({ transcript, setTranscript, isListening
 
   return (
     <div>
-      {/* Status bar */}
       {status && (
         <div style={{
-          fontSize: '12px', color: '#6B5CE7',
-          marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px',
+          fontSize: '12px', color: '#6B5CE7', marginBottom: '8px',
+          display: 'flex', alignItems: 'center', gap: '6px',
           padding: '6px 10px', borderRadius: '7px',
           background: '#F4F3FF', border: '1px solid #DDD9FF',
         }}>
           <span style={{
             width: 7, height: 7, borderRadius: '50%', background: '#6B5CE7',
             display: 'inline-block', flexShrink: 0,
-            animation: isListening ? 'transcriptPulse 1.5s ease-in-out infinite' : 'none',
+            animation: isListening ? 'tPulse 1.5s ease-in-out infinite' : 'none',
           }} />
           {status}
         </div>
       )}
 
-      {/* Speaker legend */}
       {isListening && (
         <div style={{ display: 'flex', gap: '14px', marginBottom: '8px', fontSize: '12px', color: '#6B7280' }}>
           <span><span style={{ color: getColor(myName) }}>●</span> {myName}</span>
@@ -163,31 +166,19 @@ export default function TranscriptPanel({ transcript, setTranscript, isListening
         </div>
       )}
 
-      {/* Transcript box */}
       <div style={{
-        background: '#ffffff',
-        border: '1.5px solid #DDD9FF',
-        borderRadius: '10px',
-        padding: '12px 14px',
-        minHeight: '80px',
-        maxHeight: '260px',
-        overflowY: 'auto',
-        fontSize: '13px',
-        lineHeight: 1.6,
+        background: '#ffffff', border: '1.5px solid #DDD9FF', borderRadius: '10px',
+        padding: '12px 14px', minHeight: '80px', maxHeight: '260px',
+        overflowY: 'auto', fontSize: '13px', lineHeight: 1.6,
         boxShadow: '0 1px 4px rgba(107,92,231,0.05)',
       }}>
         {transcript.length === 0 ? (
           <span style={{ color: '#9ca3af' }}>
-            {isListening
-              ? 'Speak now — your words appear instantly…'
-              : 'Start listening to see transcript here.'}
+            {isListening ? 'Listening — transcript updates every ~3 s…' : 'Start listening to see transcript here.'}
           </span>
         ) : transcript.map((line, i) => (
           <div key={i} style={{ marginBottom: '6px' }}>
-            <span style={{ fontWeight: 700, color: getColor(line.speaker) }}>
-              {line.speaker}:
-            </span>
-            {' '}
+            <span style={{ fontWeight: 700, color: getColor(line.speaker) }}>{line.speaker}:</span>{' '}
             <span style={{ color: '#1A1A2E' }}>{line.text}</span>
           </div>
         ))}
@@ -195,7 +186,7 @@ export default function TranscriptPanel({ transcript, setTranscript, isListening
       </div>
 
       <style>{`
-        @keyframes transcriptPulse {
+        @keyframes tPulse {
           0%, 100% { opacity: 0.4; transform: scale(0.85); }
           50%       { opacity: 1;   transform: scale(1);    }
         }
