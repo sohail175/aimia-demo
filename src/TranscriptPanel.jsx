@@ -1,22 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
 
-const BACKEND  = 'https://aimia-demo.onrender.com'
-const CHUNK_MS = 3000
-const SEND_TIMEOUT_MS = 45000
+const BACKEND    = 'https://aimia-demo.onrender.com'
+const WS_BACKEND = 'wss://aimia-demo.onrender.com'
 
 const SPEAKER_COLORS = { You: '#6B5CE7', Customer: '#d97706' }
 const getColor = (name) => SPEAKER_COLORS[name] ?? '#0ea5e9'
 
+const mapSpeaker = (speaker, agentName) => {
+  if (!speaker) return agentName || 'You'
+  const s = speaker.toLowerCase()
+  if (s.includes('0') || s === 'agent' || s === 'host') return agentName || 'You'
+  return 'Customer'
+}
+
 export default function TranscriptPanel({
-  transcript, setTranscript, isListening, setIsListening, agentName,
+  transcript, setTranscript, isListening, setIsListening, agentName, meetingUrl,
 }) {
-  const [status, setStatus]  = useState('')
-  const micStreamRef         = useRef(null)
-  const sysStreamRef         = useRef(null)
-  const isActiveRef          = useRef(false)
-  const bottomRef            = useRef(null)
-  const sendQueueRef         = useRef([])
-  const processingRef        = useRef(false)
+  const [status, setStatus] = useState('')
+  const [botId, setBotId]   = useState(null)
+
+  const sessionIdRef   = useRef(null)
+  const wsRef          = useRef(null)
+  const recognitionRef = useRef(null)
+  const isActiveRef    = useRef(false)
+  const bottomRef      = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -36,126 +43,116 @@ export default function TranscriptPanel({
     })
   }
 
-  const recordChunk = (stream, mime) => new Promise((resolve) => {
-    const chunks = []
-    let rec
-    try { rec = new MediaRecorder(stream, { mimeType: mime }) }
-    catch { resolve(null); return }
-    rec.ondataavailable = (e) => { if (e.data?.size > 0) chunks.push(e.data) }
-    rec.onstop = () => resolve(new Blob(chunks, { type: mime }))
-    rec.start()
-    setTimeout(() => { try { rec.stop() } catch {} }, CHUNK_MS)
-  })
-
-  const sendChunk = async (blob, speaker) => {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS)
-    try {
-      const form = new FormData()
-      form.append('audio', blob, 'chunk.webm')
-      const res = await fetch(`${BACKEND}/transcribe-chunk`, {
-        method: 'POST', body: form, signal: controller.signal,
-      })
-      clearTimeout(timer)
-      if (!res.ok) return
-      const { text } = await res.json()
-      if (text?.trim()) addLine(speaker, text.trim())
-    } catch {
-      clearTimeout(timer)
-    }
-  }
-
-  const processQueue = async () => {
-    if (processingRef.current) return
-    processingRef.current = true
-    while (sendQueueRef.current.length > 0 && isActiveRef.current) {
-      const { blob, speaker } = sendQueueRef.current.shift()
-      await sendChunk(blob, speaker)
-    }
-    processingRef.current = false
-  }
-
-  const enqueue = (blob, speaker) => {
-    sendQueueRef.current.push({ blob, speaker })
-    processQueue()
-  }
-
-  const runLoop = async (stream, speaker) => {
-    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus' : 'audio/webm'
-    while (isActiveRef.current) {
-      const blob = await recordChunk(stream, mime)
-      if (!isActiveRef.current) break
-      if (blob && blob.size > 1000) enqueue(blob, speaker)
-    }
-  }
-
   const startAll = async () => {
-    try {
-      isActiveRef.current   = true
-      sendQueueRef.current  = []
-      processingRef.current = false
-
-      setStatus('🎤 Requesting microphone…')
-      let micStream
-      try {
-        micStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl:  true,
-            channelCount:     1,
-            sampleRate:       16000,
-          },
-        })
-        micStreamRef.current = micStream
-      } catch {
-        setStatus('❌ Microphone denied — allow mic access then refresh')
-        setIsListening(false)
-        return
-      }
-
-      setStatus('📺 Select your WhatsApp / YouTube tab → click Share')
-      let displayStream
-      try {
-        displayStream = await navigator.mediaDevices.getDisplayMedia({
-          audio: true,
-          video: { width: 1, height: 1 },
-        })
-        displayStream.getVideoTracks().forEach(t => t.stop())
-      } catch {
-        setStatus('🎤 Mic only — customer audio unavailable (screen share cancelled)')
-        runLoop(micStream, agentName || 'You')
-        return
-      }
-
-      const sysAudio = displayStream.getAudioTracks()
-      if (sysAudio.length === 0) {
-        setStatus('⚠️ No tab audio — stop, retry and tick "Share tab audio"')
-        runLoop(micStream, agentName || 'You')
-        return
-      }
-
-      const sysStream      = new MediaStream(sysAudio)
-      sysStreamRef.current = sysStream
-      setStatus('🎙 Live — transcript updates every ~20 s')
-
-      runLoop(micStream, agentName || 'You')
-      runLoop(sysStream, 'Customer')
-
-    } catch (err) {
-      setStatus('❌ ' + err.message)
-      setIsListening(false)
+    isActiveRef.current  = true
+    sessionIdRef.current = crypto.randomUUID()
+    if (meetingUrl?.trim()) {
+      await startBotMode()
+    } else {
+      await startBrowserMode()
     }
+  }
+
+  const startBotMode = async () => {
+    setStatus('🔗 Connecting to backend...')
+
+    const ws = new WebSocket(`${WS_BACKEND}/ws/${sessionIdRef.current}`)
+    wsRef.current = ws
+
+    ws.onmessage = (event) => {
+      try {
+        const data    = JSON.parse(event.data)
+        const speaker = mapSpeaker(data.speaker, agentName)
+        if (data.text?.trim()) addLine(speaker, data.text.trim())
+      } catch {}
+    }
+
+    ws.onerror = () => setStatus('❌ WebSocket error — check backend is running')
+
+    ws.onopen = async () => {
+      try {
+        const res = await fetch(`${BACKEND}/create-bot`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            meeting_url: meetingUrl.trim(),
+            session_id:  sessionIdRef.current,
+            bot_name:    'AIMIA Assistant',
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.detail || 'Bot creation failed')
+        setBotId(data.bot_id)
+        setStatus('🤖 AIMIA bot joining your Teams call — admit it in Teams when prompted...')
+      } catch (err) {
+        setStatus('❌ ' + err.message)
+        setIsListening(false)
+      }
+    }
+
+    ws.onclose = () => {
+      if (isActiveRef.current) setStatus('⚠️ Connection dropped — try restarting the call')
+    }
+  }
+
+  const startBrowserMode = async () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SR) {
+      setStatus('❌ Browser mode requires Chrome. Paste a Teams URL above for full capture.')
+      setIsListening(false)
+      return
+    }
+
+    setStatus('🎤 Mic only — paste a Teams meeting URL above for full call capture')
+
+    const recognition          = new SR()
+    recognition.continuous     = true
+    recognition.interimResults = false
+    recognition.lang           = 'en-AU'
+
+    recognition.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          const text = e.results[i][0].transcript.trim()
+          if (text) addLine(agentName || 'You', text)
+        }
+      }
+    }
+
+    recognition.onerror = (e) => {
+      if (e.error !== 'no-speech') setStatus('⚠️ Mic error: ' + e.error)
+    }
+
+    recognition.onend = () => {
+      if (isActiveRef.current) recognition.start()
+    }
+
+    recognitionRef.current = recognition
+    recognition.start()
   }
 
   const stopAll = () => {
-    isActiveRef.current  = false
-    sendQueueRef.current = []
-    micStreamRef.current?.getTracks().forEach(t => t.stop())
-    sysStreamRef.current?.getTracks().forEach(t => t.stop())
-    micStreamRef.current = null
-    sysStreamRef.current = null
+    isActiveRef.current = false
+
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
+
+    if (botId && sessionIdRef.current) {
+      fetch(`${BACKEND}/stop-bot`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ bot_id: botId, session_id: sessionIdRef.current }),
+      }).catch(() => {})
+      setBotId(null)
+    }
+
+    if (recognitionRef.current) {
+      recognitionRef.current.stop()
+      recognitionRef.current = null
+    }
+
     setStatus('')
   }
 
@@ -195,8 +192,10 @@ export default function TranscriptPanel({
         {transcript.length === 0 ? (
           <span style={{ color: '#9ca3af' }}>
             {isListening
-              ? 'Listening — first line appears in ~20 s…'
-              : 'Start listening to see transcript here.'}
+              ? meetingUrl?.trim()
+                ? 'Bot joining Teams... transcript appears once admitted (30–60 s)'
+                : 'Listening — speak to see transcript...'
+              : 'Paste your Teams meeting URL above, then start the call.'}
           </span>
         ) : transcript.map((line, i) => (
           <div key={i} style={{ marginBottom: '6px' }}>

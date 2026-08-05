@@ -12,6 +12,7 @@ function AimiaLayout({ onViewChange }) {
   const [isListening, setIsListening] = useState(false)
   const [transcript, setTranscript] = useState([])
   const [agentName, setAgentName] = useState('')
+  const [meetingUrl, setMeetingUrl] = useState('')
 
   const [preCallInput, setPreCallInput] = useState('')
   const [contextChips, setContextChips] = useState([])
@@ -36,9 +37,8 @@ function AimiaLayout({ onViewChange }) {
   useEffect(() => { transcriptRef.current = transcript }, [transcript])
   useEffect(() => { contextChipsRef.current = contextChips }, [contextChips])
   useEffect(() => { preCallImagesRef.current = preCallImages }, [preCallImages])
-useEffect(() => {
-  fetch(BACKEND).catch(() => {})
-}, [])
+  useEffect(() => { fetch(BACKEND).catch(() => {}) }, [])
+
   const nextId = () => ++idRef.current
   const canSubmit = preCallInput.trim().length > 0 || preCallImages.length > 0
 
@@ -216,7 +216,6 @@ useEffect(() => {
 
   const allNudgesForStats = [...nudgeHistory, ...(currentNudge ? [currentNudge] : [])]
 
-  // ── Atlas colour tokens ──────────────────────────────────────────────────
   const purple = '#6B5CE7'
   const purpleLight = '#F4F3FF'
   const purpleBorder = '#DDD9FF'
@@ -250,7 +249,29 @@ useEffect(() => {
                 flex: 1, padding: '6px 10px',
                 border: `1px solid ${purpleBorder}`, borderRadius: '7px',
                 fontSize: '13px', outline: 'none', fontFamily: 'inherit',
-                transition: 'border-color 0.15s',
+              }}
+              onFocus={e => e.target.style.borderColor = purple}
+              onBlur={e => e.target.style.borderColor = purpleBorder}
+            />
+          </div>
+
+          {/* Teams Meeting URL */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#6B7280', whiteSpace: 'nowrap' }}>
+              Teams URL:
+            </label>
+            <input
+              type="text"
+              value={meetingUrl}
+              onChange={e => setMeetingUrl(e.target.value)}
+              placeholder="Paste Microsoft Teams meeting link here..."
+              disabled={isListening}
+              style={{
+                flex: 1, padding: '6px 10px',
+                border: `1px solid ${purpleBorder}`, borderRadius: '7px',
+                fontSize: '13px', outline: 'none', fontFamily: 'inherit',
+                opacity: isListening ? 0.5 : 1,
+                background: isListening ? '#f9fafb' : '#fff',
               }}
               onFocus={e => e.target.style.borderColor = purple}
               onBlur={e => e.target.style.borderColor = purpleBorder}
@@ -360,13 +381,16 @@ useEffect(() => {
           )}
 
           <CallSettings callType={callType} onCallTypeChange={setCallType} isListening={isListening} onListeningChange={setIsListening} />
+
           <TranscriptPanel
             transcript={transcript}
             setTranscript={setTranscript}
             isListening={isListening}
             setIsListening={setIsListening}
             agentName={agentName}
+            meetingUrl={meetingUrl}
           />
+
           <SessionStats transcript={transcript} nudges={allNudgesForStats} isListening={isListening} />
 
           {/* End Call Button */}
@@ -391,7 +415,6 @@ useEffect(() => {
             {callStatus === 'error'  && '❌ Save Failed — Retry'}
           </button>
 
-          {/* Summary */}
           {summary && (
             <div style={{
               padding: '16px', borderRadius: '10px',
