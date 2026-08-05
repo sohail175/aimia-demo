@@ -3,9 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from models import CallRecord, NudgeFeedback, Comment
 import json
 import os
-import tempfile
-import subprocess
 import httpx
+from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,12 +12,18 @@ load_dotenv()
 app = FastAPI(title="AIMIA Backend API")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-HAIKU_MODEL  = "claude-haiku-4-5-20251001"
-SONNET_MODEL = "claude-sonnet-4-6"
+GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
+HAIKU_MODEL       = "claude-haiku-4-5-20251001"
+SONNET_MODEL      = "claude-sonnet-4-6"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "https://aimia-demo.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -242,61 +247,18 @@ Return ONLY the summary text, no headings, no bullet points."""
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── Whisper tiny — fast customer audio transcription (no diarization) ─────────
-
-_whisper_tiny_model = None
-
-def _get_whisper_tiny():
-    global _whisper_tiny_model
-    if _whisper_tiny_model is None:
-        import whisper
-        print("Loading Whisper tiny model...")
-        _whisper_tiny_model = whisper.load_model("tiny")
-        print("Whisper tiny ready.")
-    return _whisper_tiny_model
-
 @app.post("/transcribe-chunk")
 async def transcribe_chunk(audio: UploadFile = File(...)):
-    """
-    Fast endpoint for customer audio chunks (5s).
-    Just Whisper tiny — no diarization. Speaker label assigned by frontend.
-    """
-    suffix = os.path.splitext(audio.filename or "chunk.webm")[1] or ".webm"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(await audio.read())
-        tmp_path = tmp.name
-    wav_path = tmp_path + "_16k.wav"
+    content = await audio.read()
+    filename = audio.filename or "chunk.webm"
     try:
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", tmp_path, "-ar", "16000", "-ac", "1", wav_path],
-            capture_output=True, check=True
+        client = Groq(api_key=GROQ_API_KEY)
+        transcription = client.audio.transcriptions.create(
+            model="whisper-large-v3-turbo",
+            file=(filename, content, "audio/webm"),
+            response_format="text",
         )
-        model = _get_whisper_tiny()
-        result = model.transcribe(wav_path, fp16=False)
-        return {"text": result["text"].strip()}
+        text = transcription if isinstance(transcription, str) else transcription.text
+        return {"text": text.strip()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        for p in [tmp_path, wav_path]:
-            if os.path.exists(p): os.unlink(p)
-
-
-# ── Legacy diarization endpoint (kept for reference) ─────────────────────────
-
-@app.post("/transcribe-diarize")
-async def transcribe_diarize(audio: UploadFile = File(...)):
-    from diarization import transcribe_and_label_speakers, merge_consecutive_same_speaker
-    suffix = os.path.splitext(audio.filename or "chunk.webm")[1] or ".webm"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        content = await audio.read()
-        tmp.write(content)
-        tmp_path = tmp.name
-    try:
-        segments = transcribe_and_label_speakers(tmp_path)
-        merged = merge_consecutive_same_speaker(segments)
-        return {"segments": merged}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
