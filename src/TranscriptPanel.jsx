@@ -59,6 +59,53 @@ export default function TranscriptPanel({
     const ws = new WebSocket(`${WS_BACKEND}/ws/${sessionIdRef.current}`)
     wsRef.current = ws
 
+    // Keepalive ping every 20s — prevents Render from dropping idle WebSocket
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send('ping')
+    }, 20000)
+
+    ws.onmessage = (event) => {
+      if (event.data === 'pong') return   // ignore keepalive response
+      try {
+        const data    = JSON.parse(event.data)
+        const speaker = mapSpeaker(data.speaker, agentName)
+        if (data.text?.trim()) addLine(speaker, data.text.trim())
+      } catch {}
+    }
+
+    ws.onerror = () => {
+      clearInterval(pingInterval)
+      setStatus('❌ WebSocket error — check backend is running')
+    }
+
+    ws.onopen = async () => {
+      try {
+        const res = await fetch(`${BACKEND}/create-bot`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            meeting_url: meetingUrl.trim(),
+            session_id:  sessionIdRef.current,
+            bot_name:    'AIMIA Assistant',
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.detail || 'Bot creation failed')
+        setBotId(data.bot_id)
+        setStatus('🤖 AIMIA bot joining your Teams call — admit it in Teams when prompted...')
+      } catch (err) {
+        clearInterval(pingInterval)
+        setStatus('❌ ' + err.message)
+        setIsListening(false)
+      }
+    }
+
+    ws.onclose = () => {
+      clearInterval(pingInterval)
+      if (isActiveRef.current) setStatus('⚠️ Connection dropped — try restarting the call')
+    }
+  }
+
     ws.onmessage = (event) => {
       try {
         const data    = JSON.parse(event.data)
