@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 const BACKEND  = 'https://aimia-demo.onrender.com'
 const CHUNK_MS = 3000
-const SEND_TIMEOUT_MS = 12000   // abort if Render doesn't respond in 12 s
+const SEND_TIMEOUT_MS = 45000  // abort if Render doesn't respond in 12 s
 
 const SPEAKER_COLORS = { You: '#6B5CE7', Customer: '#d97706' }
 const getColor = (name) => SPEAKER_COLORS[name] ?? '#0ea5e9'
