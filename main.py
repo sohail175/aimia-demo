@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from models import CallRecord, NudgeFeedback, Comment
 import json
 import os
+import asyncio
 import httpx
 from groq import Groq
 from dotenv import load_dotenv
@@ -13,10 +14,12 @@ app = FastAPI(title="AIMIA Backend API")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
+DEEPGRAM_API_KEY  = os.getenv("DEEPGRAM_API_KEY")
+RECALL_API_KEY    = os.getenv("RECALL_API_KEY")
+RECALL_BASE_URL   = "https://api.ap-northeast-1.recall.ai"
 HAIKU_MODEL       = "claude-haiku-4-5-20251001"
 SONNET_MODEL      = "claude-sonnet-4-6"
 
-# ── CORS — allow local dev + Vercel production ────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -72,6 +75,113 @@ FRAMEWORKS = {
 - Suggest next steps if conversation is wrapping up""",
 }
 
+# ── WebSocket connections: session_id → WebSocket ────────────────────────────
+transcript_connections: dict = {}
+polling_tasks: dict = {}
+
+@app.websocket("/ws/{session_id}")
+async def transcript_ws(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    transcript_connections[session_id] = websocket
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        transcript_connections.pop(session_id, None)
+        task = polling_tasks.pop(session_id, None)
+        if task:
+            task.cancel()
+
+# ── Recall.ai bot endpoints ───────────────────────────────────────────────────
+@app.post("/create-bot")
+async def create_bot(payload: dict):
+    meeting_url = payload.get("meeting_url")
+    session_id  = payload.get("session_id")
+    bot_name    = payload.get("bot_name", "AIMIA Assistant")
+
+    if not meeting_url or not session_id:
+        raise HTTPException(status_code=400, detail="meeting_url and session_id required")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{RECALL_BASE_URL}/api/v1/bot/",
+                headers={
+                    "Authorization": f"Token {RECALL_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "meeting_url": meeting_url,
+                    "bot_name": bot_name,
+                    "transcription_options": {
+                        "provider": "deepgram",
+                        "deepgram": {
+                            "api_key": DEEPGRAM_API_KEY,
+                            "model":   "nova-2",
+                            "smart_format": True,
+                            "diarize": True,
+                        }
+                    }
+                }
+            )
+            response.raise_for_status()
+            bot_id = response.json()["id"]
+            task = asyncio.create_task(poll_transcript(session_id, bot_id))
+            polling_tasks[session_id] = task
+            return {"bot_id": bot_id, "status": "joining"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def poll_transcript(session_id: str, bot_id: str):
+    seen_count = 0
+    for _ in range(1200):
+        await asyncio.sleep(3)
+        ws = transcript_connections.get(session_id)
+        if not ws:
+            break
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{RECALL_BASE_URL}/api/v1/bot/{bot_id}/transcript/",
+                    headers={"Authorization": f"Token {RECALL_API_KEY}"}
+                )
+                if resp.status_code == 200:
+                    entries     = resp.json()
+                    new_entries = entries[seen_count:]
+                    for entry in new_entries:
+                        speaker = entry.get("speaker", "Unknown")
+                        words   = entry.get("words", [])
+                        text    = " ".join(
+                            w.get("text", "") for w in (words if isinstance(words, list) else [])
+                        ).strip()
+                        if text:
+                            await ws.send_json({"speaker": speaker, "text": text})
+                    seen_count = len(entries)
+        except Exception as e:
+            print(f"Poll error [{session_id}]: {e}")
+
+
+@app.post("/stop-bot")
+async def stop_bot(payload: dict):
+    bot_id     = payload.get("bot_id")
+    session_id = payload.get("session_id")
+    task = polling_tasks.pop(session_id, None)
+    if task:
+        task.cancel()
+    transcript_connections.pop(session_id, None)
+    if bot_id:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(
+                    f"{RECALL_BASE_URL}/api/v1/bot/{bot_id}/leave_call/",
+                    headers={"Authorization": f"Token {RECALL_API_KEY}"}
+                )
+        except Exception:
+            pass
+    return {"status": "stopped"}
+
+
 @app.get("/")
 def root():
     return {"message": "AIMIA Backend is running"}
@@ -119,8 +229,8 @@ def get_call(call_id: str):
 
 @app.post("/generate-nudges")
 async def generate_nudges(payload: dict):
-    transcript = payload.get("transcript", [])
-    call_type = payload.get("call_type", "Sales discovery")
+    transcript       = payload.get("transcript", [])
+    call_type        = payload.get("call_type", "Sales discovery")
     pre_call_context = payload.get("pre_call_context", "")
 
     if not transcript:
@@ -130,7 +240,7 @@ async def generate_nudges(payload: dict):
         f"{line['speaker']}: {line['text']}"
         for line in transcript[-6:]
     )
-    framework = FRAMEWORKS.get(call_type, FRAMEWORKS["General"])
+    framework     = FRAMEWORKS.get(call_type, FRAMEWORKS["General"])
     context_block = f"\n\nPre-call context about this prospect/meeting:\n{pre_call_context}" if pre_call_context else ""
 
     prompt = f"""You are AIMIA, an AI Meeting Intelligence Assistant for a {call_type} call at Cultural Infusion.
@@ -167,12 +277,12 @@ CRITICAL: Your entire response must be ONLY the raw JSON array. No markdown code
             )
             response.raise_for_status()
             data = response.json()
-            raw = data["content"][0]["text"].strip()
+            raw  = data["content"][0]["text"].strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
                 raw = raw.replace("json", "", 1).strip()
             start = raw.find("[")
-            end = raw.rfind("]") + 1
+            end   = raw.rfind("]") + 1
             if start != -1 and end != -1:
                 raw = raw[start:end]
             nudges = json.loads(raw)
@@ -185,8 +295,8 @@ CRITICAL: Your entire response must be ONLY the raw JSON array. No markdown code
 @app.post("/generate-summary")
 async def generate_summary(payload: dict):
     transcript = payload.get("transcript", [])
-    call_type = payload.get("call_type", "Sales discovery")
-    nudges = payload.get("nudges", [])
+    call_type  = payload.get("call_type", "Sales discovery")
+    nudges     = payload.get("nudges", [])
 
     if not transcript:
         raise HTTPException(status_code=400, detail="Transcript is empty")
@@ -241,31 +351,24 @@ Return ONLY the summary text, no headings, no bullet points."""
                 json=body
             )
             response.raise_for_status()
-            data = response.json()
+            data    = response.json()
             summary = data["content"][0]["text"].strip()
             return {"summary": summary, "model_used": SONNET_MODEL}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── Transcription via Groq Whisper API — fast, free, no local model ───────────
-
 @app.post("/transcribe-chunk")
 async def transcribe_chunk(audio: UploadFile = File(...)):
-    """
-    Transcribes audio using Groq's Whisper API.
-    Responds in <1 second. Supports webm, mp3, wav, mp4, m4a.
-    Free tier: 7,200 seconds of audio per day.
-    """
-    content = await audio.read()
+    content  = await audio.read()
     filename = audio.filename or "chunk.webm"
-
     try:
         client = Groq(api_key=GROQ_API_KEY)
         transcription = client.audio.transcriptions.create(
             model="whisper-large-v3-turbo",
             file=(filename, content, "audio/webm"),
             response_format="text",
+            language="en",
         )
         text = transcription if isinstance(transcription, str) else transcription.text
         return {"text": text.strip()}
