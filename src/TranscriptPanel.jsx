@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 const BACKEND  = 'https://aimia-demo.onrender.com'
 const CHUNK_MS = 3000
-const SEND_TIMEOUT_MS = 45000  // abort if Render doesn't respond in 12 s
+const SEND_TIMEOUT_MS = 45000
 
 const SPEAKER_COLORS = { You: '#6B5CE7', Customer: '#d97706' }
 const getColor = (name) => SPEAKER_COLORS[name] ?? '#0ea5e9'
@@ -10,11 +10,13 @@ const getColor = (name) => SPEAKER_COLORS[name] ?? '#0ea5e9'
 export default function TranscriptPanel({
   transcript, setTranscript, isListening, setIsListening, agentName,
 }) {
-  const [status, setStatus]   = useState('')
-  const micStreamRef          = useRef(null)
-  const sysStreamRef          = useRef(null)
-  const isActiveRef           = useRef(false)
-  const bottomRef             = useRef(null)
+  const [status, setStatus]  = useState('')
+  const micStreamRef         = useRef(null)
+  const sysStreamRef         = useRef(null)
+  const isActiveRef          = useRef(false)
+  const bottomRef            = useRef(null)
+  const sendQueueRef         = useRef([])
+  const processingRef        = useRef(false)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -34,27 +36,24 @@ export default function TranscriptPanel({
     })
   }
 
-  /* ── record exactly CHUNK_MS of audio, return a Blob ───────────────── */
   const recordChunk = (stream, mime) => new Promise((resolve) => {
     const chunks = []
     let rec
     try { rec = new MediaRecorder(stream, { mimeType: mime }) }
     catch { resolve(null); return }
-
     rec.ondataavailable = (e) => { if (e.data?.size > 0) chunks.push(e.data) }
     rec.onstop = () => resolve(new Blob(chunks, { type: mime }))
     rec.start()
     setTimeout(() => { try { rec.stop() } catch {} }, CHUNK_MS)
   })
 
-  /* ── send one blob, wait for Whisper, add line ──────────────────────── */
   const sendChunk = async (blob, speaker) => {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS)
     try {
       const form = new FormData()
       form.append('audio', blob, 'chunk.webm')
-      const res  = await fetch(`${BACKEND}/transcribe-chunk`, {
+      const res = await fetch(`${BACKEND}/transcribe-chunk`, {
         method: 'POST', body: form, signal: controller.signal,
       })
       clearTimeout(timer)
@@ -66,22 +65,36 @@ export default function TranscriptPanel({
     }
   }
 
-  /* ── sequential loop: record → send → record → send … ──────────────── */
+  const processQueue = async () => {
+    if (processingRef.current) return
+    processingRef.current = true
+    while (sendQueueRef.current.length > 0 && isActiveRef.current) {
+      const { blob, speaker } = sendQueueRef.current.shift()
+      await sendChunk(blob, speaker)
+    }
+    processingRef.current = false
+  }
+
+  const enqueue = (blob, speaker) => {
+    sendQueueRef.current.push({ blob, speaker })
+    processQueue()
+  }
+
   const runLoop = async (stream, speaker) => {
     const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus' : 'audio/webm'
-
     while (isActiveRef.current) {
       const blob = await recordChunk(stream, mime)
       if (!isActiveRef.current) break
-      if (blob && blob.size > 1000) await sendChunk(blob, speaker)
+      if (blob && blob.size > 1000) enqueue(blob, speaker)
     }
   }
 
-  /* ── start mic + screen share ───────────────────────────────────────── */
   const startAll = async () => {
     try {
-      isActiveRef.current = true
+      isActiveRef.current   = true
+      sendQueueRef.current  = []
+      processingRef.current = false
 
       setStatus('🎤 Requesting microphone…')
       let micStream
@@ -125,7 +138,7 @@ export default function TranscriptPanel({
 
       const sysStream      = new MediaStream(sysAudio)
       sysStreamRef.current = sysStream
-      setStatus('🎙 Live — transcript updates every ~3 s')
+      setStatus('🎙 Live — transcript updates every ~20 s')
 
       runLoop(micStream, agentName || 'You')
       runLoop(sysStream, 'Customer')
@@ -136,9 +149,9 @@ export default function TranscriptPanel({
     }
   }
 
-  /* ── stop everything cleanly ────────────────────────────────────────── */
   const stopAll = () => {
-    isActiveRef.current = false
+    isActiveRef.current  = false
+    sendQueueRef.current = []
     micStreamRef.current?.getTracks().forEach(t => t.stop())
     sysStreamRef.current?.getTracks().forEach(t => t.stop())
     micStreamRef.current = null
@@ -181,7 +194,9 @@ export default function TranscriptPanel({
       }}>
         {transcript.length === 0 ? (
           <span style={{ color: '#9ca3af' }}>
-            {isListening ? 'Listening — transcript updates every ~3 s…' : 'Start listening to see transcript here.'}
+            {isListening
+              ? 'Listening — first line appears in ~20 s…'
+              : 'Start listening to see transcript here.'}
           </span>
         ) : transcript.map((line, i) => (
           <div key={i} style={{ marginBottom: '6px' }}>
