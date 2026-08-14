@@ -1,16 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 
+const BACKEND = 'https://aimia-demo.onrender.com'
 const SPEAKER_COLORS = { You: '#6B5CE7', Customer: '#d97706' }
 const getColor = (name) => SPEAKER_COLORS[name] ?? '#0ea5e9'
 
 export default function TranscriptPanel({
   transcript, setTranscript, isListening, setIsListening, agentName,
 }) {
-  const [status, setStatus] = useState('')
+  const [status, setStatus]       = useState('')
+  const [sourceType, setSourceType] = useState(null) // 'screen' | 'mic'
 
-  const recognitionRef = useRef(null)
-  const isActiveRef    = useRef(false)
-  const bottomRef      = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const streamRef        = useRef(null)
+  const recognitionRef   = useRef(null)
+  const isActiveRef      = useRef(false)
+  const chunkQueueRef    = useRef(Promise.resolve())
+  const bottomRef        = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -18,8 +23,8 @@ export default function TranscriptPanel({
 
   useEffect(() => {
     if (isListening) startListening()
-    else             stopListening()
-    return () => stopListening()
+    else             stopAll()
+    return () => stopAll()
   }, [isListening])
 
   const addLine = (speaker, text) => {
@@ -30,7 +35,76 @@ export default function TranscriptPanel({
     })
   }
 
-  const startListening = () => {
+  // ── MAIN ENTRY: show screen/tab/window picker ─────────────────────────────
+  const startListening = async () => {
+    isActiveRef.current = true
+    setStatus('🖥️ Select a screen, window, or browser tab to record...')
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: { echoCancellation: true, noiseSuppression: true },
+      })
+
+      streamRef.current = stream
+      setSourceType('screen')
+      setStatus('🔴 Recording — transcript appears every few seconds...')
+
+      // If user clicks "Stop sharing" in the browser bar
+      stream.getVideoTracks()[0].onended = () => {
+        if (isActiveRef.current) {
+          setStatus('⏹ Screen sharing stopped')
+          setIsListening(false)
+        }
+      }
+
+      startMediaRecorder(stream)
+
+    } catch (err) {
+      // User cancelled the picker — fall back to mic
+      setStatus('🎤 No screen selected — using microphone instead')
+      startMicMode()
+    }
+  }
+
+  // ── SCREEN MODE: capture audio from selected stream ───────────────────────
+  const startMediaRecorder = (stream) => {
+    const audioCtx = new AudioContext()
+    const source   = audioCtx.createMediaStreamSource(stream)
+    const dest     = audioCtx.createMediaStreamDestination()
+    source.connect(dest)
+
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm'
+
+    const recorder = new MediaRecorder(dest.stream, { mimeType })
+    mediaRecorderRef.current = recorder
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        // Queue chunks so they don't overlap
+        chunkQueueRef.current = chunkQueueRef.current.then(() => sendChunk(e.data))
+      }
+    }
+
+    recorder.start(4000) // send chunk every 4 seconds
+  }
+
+  const sendChunk = async (blob) => {
+    if (!isActiveRef.current) return
+    try {
+      const form = new FormData()
+      form.append('audio', blob, 'chunk.webm')
+      const res  = await fetch(`${BACKEND}/transcribe-chunk`, { method: 'POST', body: form })
+      const data = await res.json()
+      const text = data.text?.trim()
+      if (text) addLine(agentName || 'You', text)
+    } catch {}
+  }
+
+  // ── MIC MODE: Web Speech API fallback ────────────────────────────────────
+  const startMicMode = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SR) {
       setStatus('❌ Speech recognition requires Chrome.')
@@ -38,8 +112,8 @@ export default function TranscriptPanel({
       return
     }
 
-    isActiveRef.current = true
-    setStatus('🎤 Listening...')
+    setSourceType('mic')
+    setStatus('🎤 Listening via microphone...')
 
     const recognition          = new SR()
     recognition.continuous     = true
@@ -67,13 +141,27 @@ export default function TranscriptPanel({
     recognition.start()
   }
 
-  const stopListening = () => {
+  // ── STOP ─────────────────────────────────────────────────────────────────
+  const stopAll = () => {
     isActiveRef.current = false
+
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+
     if (recognitionRef.current) {
       recognitionRef.current.stop()
       recognitionRef.current = null
     }
+
     setStatus('')
+    setSourceType(null)
   }
 
   const myName = agentName || 'You'
@@ -100,6 +188,9 @@ export default function TranscriptPanel({
         <div style={{ display: 'flex', gap: '14px', marginBottom: '8px', fontSize: '12px', color: '#6B7280' }}>
           <span><span style={{ color: getColor(myName) }}>●</span> {myName}</span>
           <span><span style={{ color: getColor('Customer') }}>●</span> Customer</span>
+          <span style={{ marginLeft: 'auto', fontWeight: 600, color: sourceType === 'screen' ? '#6B5CE7' : '#9ca3af' }}>
+            {sourceType === 'screen' ? '🖥️ Screen capture' : '🎤 Mic only'}
+          </span>
         </div>
       )}
 
@@ -111,7 +202,11 @@ export default function TranscriptPanel({
       }}>
         {transcript.length === 0 ? (
           <span style={{ color: '#9ca3af' }}>
-            {isListening ? 'Listening — speak to see transcript...' : 'Start listening to see transcript here.'}
+            {isListening
+              ? sourceType === 'screen'
+                ? 'Recording screen — transcript appears every few seconds...'
+                : 'Listening — speak to see transcript...'
+              : 'Start listening to see transcript here.'}
           </span>
         ) : transcript.map((line, i) => (
           <div key={i} style={{ marginBottom: '6px' }}>
