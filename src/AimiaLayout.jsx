@@ -12,7 +12,6 @@ function AimiaLayout({ onViewChange }) {
   const [isListening, setIsListening] = useState(false)
   const [transcript, setTranscript] = useState([])
   const [agentName, setAgentName] = useState('')
-  const [meetingUrl, setMeetingUrl] = useState('')
 
   const [preCallInput, setPreCallInput] = useState('')
   const [contextChips, setContextChips] = useState([])
@@ -219,7 +218,6 @@ function AimiaLayout({ onViewChange }) {
   const purple = '#6B5CE7'
   const purpleLight = '#F4F3FF'
   const purpleBorder = '#DDD9FF'
-  const purpleMid = '#EEF2FF'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', fontFamily: 'Inter, "Segoe UI", sans-serif', background: '#F8F7FF' }}>
@@ -249,29 +247,6 @@ function AimiaLayout({ onViewChange }) {
                 flex: 1, padding: '6px 10px',
                 border: `1px solid ${purpleBorder}`, borderRadius: '7px',
                 fontSize: '13px', outline: 'none', fontFamily: 'inherit',
-              }}
-              onFocus={e => e.target.style.borderColor = purple}
-              onBlur={e => e.target.style.borderColor = purpleBorder}
-            />
-          </div>
-
-          {/* Teams Meeting URL */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: '#6B7280', whiteSpace: 'nowrap' }}>
-              Teams URL:
-            </label>
-            <input
-              type="text"
-              value={meetingUrl}
-              onChange={e => setMeetingUrl(e.target.value)}
-              placeholder="Paste Microsoft Teams meeting link here..."
-              disabled={isListening}
-              style={{
-                flex: 1, padding: '6px 10px',
-                border: `1px solid ${purpleBorder}`, borderRadius: '7px',
-                fontSize: '13px', outline: 'none', fontFamily: 'inherit',
-                opacity: isListening ? 0.5 : 1,
-                background: isListening ? '#f9fafb' : '#fff',
               }}
               onFocus={e => e.target.style.borderColor = purple}
               onBlur={e => e.target.style.borderColor = purpleBorder}
@@ -388,7 +363,6 @@ function AimiaLayout({ onViewChange }) {
             isListening={isListening}
             setIsListening={setIsListening}
             agentName={agentName}
-            meetingUrl={meetingUrl}
           />
 
           <SessionStats transcript={transcript} nudges={allNudgesForStats} isListening={isListening} />

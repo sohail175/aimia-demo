@@ -1,26 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 
-const BACKEND    = 'https://aimia-demo.onrender.com'
-const WS_BACKEND = 'wss://aimia-demo.onrender.com'
-
 const SPEAKER_COLORS = { You: '#6B5CE7', Customer: '#d97706' }
 const getColor = (name) => SPEAKER_COLORS[name] ?? '#0ea5e9'
 
-const mapSpeaker = (speaker, agentName) => {
-  if (!speaker) return agentName || 'You'
-  const s = speaker.toLowerCase()
-  if (s.includes('0') || s === 'agent' || s === 'host') return agentName || 'You'
-  return 'Customer'
-}
-
 export default function TranscriptPanel({
-  transcript, setTranscript, isListening, setIsListening, agentName, meetingUrl,
+  transcript, setTranscript, isListening, setIsListening, agentName,
 }) {
   const [status, setStatus] = useState('')
-  const [botId, setBotId]   = useState(null)
 
-  const sessionIdRef   = useRef(null)
-  const wsRef          = useRef(null)
   const recognitionRef = useRef(null)
   const isActiveRef    = useRef(false)
   const bottomRef      = useRef(null)
@@ -30,9 +17,9 @@ export default function TranscriptPanel({
   }, [transcript])
 
   useEffect(() => {
-    if (isListening) startAll()
-    else             stopAll()
-    return () => stopAll()
+    if (isListening) startListening()
+    else             stopListening()
+    return () => stopListening()
   }, [isListening])
 
   const addLine = (speaker, text) => {
@@ -43,114 +30,16 @@ export default function TranscriptPanel({
     })
   }
 
-  const startAll = async () => {
-    isActiveRef.current  = true
-    sessionIdRef.current = crypto.randomUUID()
-    if (meetingUrl?.trim()) {
-      await startBotMode()
-    } else {
-      await startBrowserMode()
-    }
-  }
-
-  const startBotMode = async () => {
-    setStatus('🔗 Connecting to backend...')
-
-    const ws = new WebSocket(`${WS_BACKEND}/ws/${sessionIdRef.current}`)
-    wsRef.current = ws
-
-    // Keepalive ping every 20s — prevents Render from dropping idle WebSocket
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) ws.send('ping')
-    }, 20000)
-
-    ws.onmessage = (event) => {
-      if (event.data === 'pong') return   // ignore keepalive response
-      try {
-        const data    = JSON.parse(event.data)
-        const speaker = mapSpeaker(data.speaker, agentName)
-        if (data.text?.trim()) addLine(speaker, data.text.trim())
-      } catch {}
-    }
-
-    ws.onerror = () => {
-      clearInterval(pingInterval)
-      setStatus('❌ WebSocket error — check backend is running')
-    }
-
-    ws.onopen = async () => {
-      try {
-        const res = await fetch(`${BACKEND}/create-bot`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({
-            meeting_url: meetingUrl.trim(),
-            session_id:  sessionIdRef.current,
-            bot_name:    'AIMIA Assistant',
-          }),
-        })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.detail || 'Bot creation failed')
-        setBotId(data.bot_id)
-        setStatus('🤖 AIMIA bot joining your Teams call — admit it in Teams when prompted...')
-      } catch (err) {
-        clearInterval(pingInterval)
-        setStatus('❌ ' + err.message)
-        setIsListening(false)
-      }
-    }
-
-    ws.onclose = () => {
-      clearInterval(pingInterval)
-      if (isActiveRef.current) setStatus('⚠️ Connection dropped — try restarting the call')
-    }
-  }
-
-    ws.onmessage = (event) => {
-      try {
-        const data    = JSON.parse(event.data)
-        const speaker = mapSpeaker(data.speaker, agentName)
-        if (data.text?.trim()) addLine(speaker, data.text.trim())
-      } catch {}
-    }
-
-    ws.onerror = () => setStatus('❌ WebSocket error — check backend is running')
-
-    ws.onopen = async () => {
-      try {
-        const res = await fetch(`${BACKEND}/create-bot`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({
-            meeting_url: meetingUrl.trim(),
-            session_id:  sessionIdRef.current,
-            bot_name:    'AIMIA Assistant',
-          }),
-        })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.detail || 'Bot creation failed')
-        setBotId(data.bot_id)
-        setStatus('🤖 AIMIA bot joining your Teams call — admit it in Teams when prompted...')
-      } catch (err) {
-        setStatus('❌ ' + err.message)
-        setIsListening(false)
-      }
-    }
-
-    ws.onclose = () => {
-      if (isActiveRef.current) setStatus('⚠️ Connection dropped — try restarting the call')
-    }
-  }
-
-  const startBrowserMode = async () => {
+  const startListening = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SR) {
-      setStatus('❌ Browser mode requires Chrome. Paste a Teams URL above for full capture.')
+      setStatus('❌ Speech recognition requires Chrome.')
       setIsListening(false)
       return
     }
 
-    setStatus('🎤 Mic only — paste a Teams meeting URL above for full call capture')
+    isActiveRef.current = true
+    setStatus('🎤 Listening...')
 
     const recognition          = new SR()
     recognition.continuous     = true
@@ -178,28 +67,12 @@ export default function TranscriptPanel({
     recognition.start()
   }
 
-  const stopAll = () => {
+  const stopListening = () => {
     isActiveRef.current = false
-
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
-    }
-
-    if (botId && sessionIdRef.current) {
-      fetch(`${BACKEND}/stop-bot`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ bot_id: botId, session_id: sessionIdRef.current }),
-      }).catch(() => {})
-      setBotId(null)
-    }
-
     if (recognitionRef.current) {
       recognitionRef.current.stop()
       recognitionRef.current = null
     }
-
     setStatus('')
   }
 
@@ -238,11 +111,7 @@ export default function TranscriptPanel({
       }}>
         {transcript.length === 0 ? (
           <span style={{ color: '#9ca3af' }}>
-            {isListening
-              ? meetingUrl?.trim()
-                ? 'Bot joining Teams... transcript appears once admitted (30–60 s)'
-                : 'Listening — speak to see transcript...'
-              : 'Paste your Teams meeting URL above, then start the call.'}
+            {isListening ? 'Listening — speak to see transcript...' : 'Start listening to see transcript here.'}
           </span>
         ) : transcript.map((line, i) => (
           <div key={i} style={{ marginBottom: '6px' }}>
