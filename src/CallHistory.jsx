@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import TopBar from './TopBar'
 
-const BACKEND = 'https://aimia-demo.onrender.com'
+const BACKEND = 'http://3.107.7.63:8000'
 
 // ── Atlas tokens ─────────────────────────────────────────────────────────────
 const purple       = '#6B5CE7'
